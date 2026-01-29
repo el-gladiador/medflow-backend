@@ -1,0 +1,49 @@
+{
+  "errors": {
+    "not_found": "{resource} not found",
+    "unauthorized": "Authentication required",
+    "forbidden": "You don't have permission for this action",
+    "bad_request": "Invalid request",
+    "conflict": "Resource already exists",
+    "internal": "An unexpected error occurred",
+    "validation_failed": "Validation failed",
+    "invalid_credentials": "Invalid email or password",
+    "token_expired": "Session has expired, please log in again",
+    "token_invalid": "Invalid authentication token",
+    "invalid_json": "Invalid JSON body"
+  },
+  "resources": {
+    "user": "User",
+    "employee": "Employee",
+    "item": "Item",
+    "batch": "Batch",
+    "location": "Location",
+    "room": "Room",
+    "cabinet": "Cabinet",
+    "shelf": "Shelf",
+    "alert": "Alert",
+    "role": "Role",
+    "permission": "Permission",
+    "invitation": "Invitation",
+    "session": "Session"
+  },
+  "validation": {
+    "required": "{field} is required",
+    "min_length": "{field} must be at least {min} characters",
+    "max_length": "{field} must be at most {max} characters",
+    "email": "Invalid email format",
+    "uuid": "Invalid ID format",
+    "positive": "{field} must be a positive number",
+    "date": "Invalid date format",
+    "iban": "Invalid IBAN format",
+    "tax_id": "Invalid Tax ID format",
+    "sv_number": "Invalid Social Security number format"
+  },
+  "success": {
+    "created": "{resource} created successfully",
+    "updated": "{resource} updated successfully",
+    "deleted": "{resource} deleted successfully",
+    "login": "Login successful",
+    "logout": "Logout successful"
+  }
+}

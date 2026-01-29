@@ -1,0 +1,49 @@
+{
+  "errors": {
+    "not_found": "{resource} nicht gefunden",
+    "unauthorized": "Authentifizierung erforderlich",
+    "forbidden": "Sie haben keine Berechtigung für diese Aktion",
+    "bad_request": "Ungültige Anfrage",
+    "conflict": "Ressource existiert bereits",
+    "internal": "Ein unerwarteter Fehler ist aufgetreten",
+    "validation_failed": "Validierung fehlgeschlagen",
+    "invalid_credentials": "Ungültige E-Mail oder Passwort",
+    "token_expired": "Sitzung abgelaufen, bitte erneut anmelden",
+    "token_invalid": "Ungültiges Authentifizierungstoken",
+    "invalid_json": "Ungültiger JSON-Body"
+  },
+  "resources": {
+    "user": "Benutzer",
+    "employee": "Mitarbeiter",
+    "item": "Artikel",
+    "batch": "Charge",
+    "location": "Standort",
+    "room": "Raum",
+    "cabinet": "Schrank",
+    "shelf": "Regal",
+    "alert": "Warnung",
+    "role": "Rolle",
+    "permission": "Berechtigung",
+    "invitation": "Einladung",
+    "session": "Sitzung"
+  },
+  "validation": {
+    "required": "{field} ist erforderlich",
+    "min_length": "{field} muss mindestens {min} Zeichen lang sein",
+    "max_length": "{field} darf höchstens {max} Zeichen lang sein",
+    "email": "Ungültiges E-Mail-Format",
+    "uuid": "Ungültiges ID-Format",
+    "positive": "{field} muss eine positive Zahl sein",
+    "date": "Ungültiges Datumsformat",
+    "iban": "Ungültiges IBAN-Format",
+    "tax_id": "Ungültiges Steuer-ID-Format",
+    "sv_number": "Ungültiges Sozialversicherungsnummer-Format"
+  },
+  "success": {
+    "created": "{resource} erfolgreich erstellt",
+    "updated": "{resource} erfolgreich aktualisiert",
+    "deleted": "{resource} erfolgreich gelöscht",
+    "login": "Anmeldung erfolgreich",
+    "logout": "Abmeldung erfolgreich"
+  }
+}

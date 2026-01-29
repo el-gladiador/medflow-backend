@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS outbox;
+DROP TABLE IF EXISTS token_blacklist;
+DROP TABLE IF EXISTS sessions;
