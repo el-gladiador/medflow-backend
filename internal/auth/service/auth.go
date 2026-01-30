@@ -1,10 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -143,9 +143,6 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*jwt.To
 		return nil, err
 	}
 
-	// Update last used
-	s.repo.UpdateLastUsed(ctx, session.ID)
-
 	// Generate new tokens
 	tokenInfo := &jwt.UserInfo{
 		ID:          user.ID,
@@ -156,7 +153,18 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*jwt.To
 		IsManager:   user.IsManager,
 	}
 
-	return s.jwtManager.GenerateTokenPair(tokenInfo, session.ID)
+	tokens, err := s.jwtManager.GenerateTokenPair(tokenInfo, session.ID)
+	if err != nil {
+		return nil, errors.Internal("failed to generate tokens")
+	}
+
+	// CRITICAL: Update session with new refresh token hash for token rotation
+	if err := s.repo.UpdateRefreshTokenHash(ctx, session.ID, tokens.RefreshToken); err != nil {
+		s.logger.Error().Err(err).Msg("failed to update refresh token hash")
+		return nil, errors.Internal("failed to update session")
+	}
+
+	return tokens, nil
 }
 
 // GetCurrentUser gets the current user from token claims
@@ -168,14 +176,22 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, userID string) (*UserI
 func (s *AuthService) validateCredentials(ctx context.Context, email, password string) (*UserInfo, error) {
 	url := fmt.Sprintf("%s/api/v1/internal/validate-credentials", s.config.Services.UserServiceURL)
 
-	body := fmt.Sprintf(`{"email":"%s","password":"%s"}`, email, password)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	requestBody := struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}{Email: email, Password: password}
+
+	bodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, errors.Internal("failed to encode request")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, errors.Internal("failed to create request")
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Body = io.NopCloser(stringReader(body))
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -238,22 +254,4 @@ func (s *AuthService) getUserInfo(ctx context.Context, userID string) (*UserInfo
 	}
 
 	return result.Data, nil
-}
-
-type stringReaderType struct {
-	s string
-	i int
-}
-
-func stringReader(s string) io.Reader {
-	return &stringReaderType{s: s}
-}
-
-func (sr *stringReaderType) Read(p []byte) (n int, err error) {
-	if sr.i >= len(sr.s) {
-		return 0, io.EOF
-	}
-	n = copy(p, sr.s[sr.i:])
-	sr.i += n
-	return
 }

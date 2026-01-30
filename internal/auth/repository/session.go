@@ -115,6 +115,14 @@ func (r *SessionRepository) UpdateLastUsed(ctx context.Context, id string) error
 	return err
 }
 
+// UpdateRefreshTokenHash updates the refresh token hash for a session (used during token rotation)
+func (r *SessionRepository) UpdateRefreshTokenHash(ctx context.Context, id string, newRefreshToken string) error {
+	newHash := hashToken(newRefreshToken)
+	query := `UPDATE sessions SET refresh_token_hash = $1, last_used_at = NOW() WHERE id = $2`
+	_, err := r.db.ExecContext(ctx, query, newHash, id)
+	return err
+}
+
 // Revoke revokes a session
 func (r *SessionRepository) Revoke(ctx context.Context, id string) error {
 	query := `UPDATE sessions SET revoked_at = NOW() WHERE id = $1`
