@@ -157,10 +157,10 @@ func (h *EmployeeHandler) UpdatePersonal(w http.ResponseWriter, r *http.Request)
 		emp.Geburtsort = req.Geburtsort
 	}
 	if req.Geschlecht != "" {
-		emp.Geschlecht = req.Geschlecht
+		emp.Geschlecht = &req.Geschlecht
 	}
 	if req.Nationalitaet != "" {
-		emp.Nationalitaet = req.Nationalitaet
+		emp.Nationalitaet = &req.Nationalitaet
 	}
 	if req.Familienstand != nil {
 		emp.Familienstand = req.Familienstand

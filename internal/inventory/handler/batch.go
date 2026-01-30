@@ -61,7 +61,7 @@ func (h *BatchHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	batch.ItemID = itemID
-	batch.IsActive = true
+	batch.Status = "active"
 	if err := h.service.CreateBatch(r.Context(), &batch); err != nil {
 		httputil.Error(w, err)
 		return

@@ -3,10 +3,13 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 
 	"github.com/medflow/medflow-backend/internal/user/domain"
 	"github.com/medflow/medflow-backend/pkg/database"
 	"github.com/medflow/medflow-backend/pkg/errors"
+	"github.com/medflow/medflow-backend/pkg/tenant"
 )
 
 // RoleRepository handles role persistence
@@ -20,30 +23,54 @@ func NewRoleRepository(db *database.DB) *RoleRepository {
 }
 
 // GetByID gets a role by ID
+// TENANT-ISOLATED: Queries only the tenant's schema
 func (r *RoleRepository) GetByID(ctx context.Context, id string) (*domain.Role, error) {
-	var role domain.Role
-	query := `
-		SELECT id, name, display_name, display_name_de, description,
-		       level::text::int as level, is_manager, can_receive_delegation, created_at, updated_at
-		FROM roles
-		WHERE id = $1
-	`
-
-	if err := r.db.GetContext(ctx, &role, query, id); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, errors.NotFound("role")
-		}
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
 		return nil, err
 	}
 
-	// Get permissions
-	permQuery := `
-		SELECT p.id, p.name, p.description, p.category, p.is_admin_only, p.created_at
-		FROM permissions p
-		JOIN role_permissions rp ON rp.permission_id = p.id
-		WHERE rp.role_id = $1
-	`
-	if err := r.db.SelectContext(ctx, &role.Permissions, permQuery, id); err != nil {
+	var role domain.Role
+	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		// Actual schema: id, name, display_name, description, is_system, is_default, permissions (JSONB)
+		query := `
+			SELECT id, name, display_name, description, permissions, created_at, updated_at
+			FROM roles
+			WHERE id = $1 AND deleted_at IS NULL
+		`
+
+		var permissions []byte
+		if err := r.db.QueryRowContext(ctx, query, id).Scan(
+			&role.ID, &role.Name, &role.DisplayName, &role.Description,
+			&permissions, &role.CreatedAt, &role.UpdatedAt,
+		); err != nil {
+			return err
+		}
+
+		// Set computed fields
+		role.IsManager = (role.Name == "admin" || role.Name == "manager")
+		role.DisplayNameDE = role.DisplayName // Use same for now
+
+		// Parse permissions from JSONB array
+		if permissions != nil {
+			var permNames []string
+			if err := json.Unmarshal(permissions, &permNames); err != nil {
+				return fmt.Errorf("failed to parse permissions: %w", err)
+			}
+			for _, permName := range permNames {
+				role.Permissions = append(role.Permissions, domain.Permission{
+					Name: permName,
+				})
+			}
+		}
+
+		return nil
+	})
+
+	if err == sql.ErrNoRows {
+		return nil, errors.NotFound("role")
+	}
+	if err != nil {
 		return nil, err
 	}
 
@@ -51,30 +78,54 @@ func (r *RoleRepository) GetByID(ctx context.Context, id string) (*domain.Role, 
 }
 
 // GetByName gets a role by name
+// TENANT-ISOLATED: Queries only the tenant's schema
 func (r *RoleRepository) GetByName(ctx context.Context, name string) (*domain.Role, error) {
-	var role domain.Role
-	query := `
-		SELECT id, name, display_name, display_name_de, description,
-		       level::text::int as level, is_manager, can_receive_delegation, created_at, updated_at
-		FROM roles
-		WHERE name = $1
-	`
-
-	if err := r.db.GetContext(ctx, &role, query, name); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, errors.NotFound("role")
-		}
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
 		return nil, err
 	}
 
-	// Get permissions
-	permQuery := `
-		SELECT p.id, p.name, p.description, p.category, p.is_admin_only, p.created_at
-		FROM permissions p
-		JOIN role_permissions rp ON rp.permission_id = p.id
-		WHERE rp.role_id = $1
-	`
-	if err := r.db.SelectContext(ctx, &role.Permissions, permQuery, role.ID); err != nil {
+	var role domain.Role
+	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		// Actual schema: id, name, display_name, description, is_system, is_default, permissions (JSONB)
+		query := `
+			SELECT id, name, display_name, description, permissions, created_at, updated_at
+			FROM roles
+			WHERE name = $1 AND deleted_at IS NULL
+		`
+
+		var permissions []byte
+		if err := r.db.QueryRowContext(ctx, query, name).Scan(
+			&role.ID, &role.Name, &role.DisplayName, &role.Description,
+			&permissions, &role.CreatedAt, &role.UpdatedAt,
+		); err != nil {
+			return err
+		}
+
+		// Set computed fields
+		role.IsManager = (role.Name == "admin" || role.Name == "manager")
+		role.DisplayNameDE = role.DisplayName
+
+		// Parse permissions from JSONB array
+		if permissions != nil {
+			var permNames []string
+			if err := json.Unmarshal(permissions, &permNames); err != nil {
+				return fmt.Errorf("failed to parse permissions: %w", err)
+			}
+			for _, permName := range permNames {
+				role.Permissions = append(role.Permissions, domain.Permission{
+					Name: permName,
+				})
+			}
+		}
+
+		return nil
+	})
+
+	if err == sql.ErrNoRows {
+		return nil, errors.NotFound("role")
+	}
+	if err != nil {
 		return nil, err
 	}
 
@@ -82,64 +133,160 @@ func (r *RoleRepository) GetByName(ctx context.Context, name string) (*domain.Ro
 }
 
 // List lists all roles
+// TENANT-ISOLATED: Returns only roles from the tenant's schema
 func (r *RoleRepository) List(ctx context.Context) ([]*domain.Role, error) {
-	query := `
-		SELECT id, name, display_name, display_name_de, description,
-		       level::text::int as level, is_manager, can_receive_delegation, created_at, updated_at
-		FROM roles
-		ORDER BY level DESC
-	`
-
-	var roles []*domain.Role
-	if err := r.db.SelectContext(ctx, &roles, query); err != nil {
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
 		return nil, err
 	}
 
-	// Get permissions for each role
-	for _, role := range roles {
-		permQuery := `
-			SELECT p.id, p.name, p.description, p.category, p.is_admin_only, p.created_at
-			FROM permissions p
-			JOIN role_permissions rp ON rp.permission_id = p.id
-			WHERE rp.role_id = $1
+	var roles []*domain.Role
+	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		// Actual schema: id, name, display_name, description, is_system, is_default, permissions (JSONB)
+		query := `
+			SELECT id, name, display_name, description, permissions, created_at, updated_at
+			FROM roles
+			WHERE deleted_at IS NULL
+			ORDER BY name
 		`
-		if err := r.db.SelectContext(ctx, &role.Permissions, permQuery, role.ID); err != nil {
-			return nil, err
+
+		rows, err := r.db.QueryxContext(ctx, query)
+		if err != nil {
+			return err
 		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var role domain.Role
+			var permissions []byte
+			if err := rows.Scan(
+				&role.ID, &role.Name, &role.DisplayName, &role.Description,
+				&permissions, &role.CreatedAt, &role.UpdatedAt,
+			); err != nil {
+				return err
+			}
+
+			// Set computed fields
+			role.IsManager = (role.Name == "admin" || role.Name == "manager")
+			role.DisplayNameDE = role.DisplayName
+
+			// Parse permissions from JSONB array
+			if permissions != nil {
+				var permNames []string
+				if err := json.Unmarshal(permissions, &permNames); err == nil {
+					for _, permName := range permNames {
+						role.Permissions = append(role.Permissions, domain.Permission{
+							Name: permName,
+						})
+					}
+				}
+			}
+
+			roles = append(roles, &role)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
 	return roles, nil
 }
 
 // GetPermissionByName gets a permission by name
+// Note: Permissions are now stored as JSONB arrays in roles table
+// This method searches all roles for the permission
 func (r *RoleRepository) GetPermissionByName(ctx context.Context, name string) (*domain.Permission, error) {
-	var perm domain.Permission
-	query := `
-		SELECT id, name, description, category, is_admin_only, created_at
-		FROM permissions
-		WHERE name = $1
-	`
-
-	if err := r.db.GetContext(ctx, &perm, query, name); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, errors.NotFound("permission")
-		}
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
 		return nil, err
 	}
 
-	return &perm, nil
+	var perm *domain.Permission
+	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		// Search roles for this permission
+		query := `
+			SELECT permissions FROM roles WHERE deleted_at IS NULL
+		`
+		rows, err := r.db.QueryContext(ctx, query)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var permissions []byte
+			if err := rows.Scan(&permissions); err != nil {
+				continue
+			}
+			var permNames []string
+			if err := json.Unmarshal(permissions, &permNames); err != nil {
+				continue
+			}
+			for _, permName := range permNames {
+				if permName == name {
+					perm = &domain.Permission{Name: name}
+					return nil
+				}
+			}
+		}
+		return sql.ErrNoRows
+	})
+
+	if err == sql.ErrNoRows || perm == nil {
+		return nil, errors.NotFound("permission")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return perm, nil
 }
 
-// ListPermissions lists all permissions
+// ListPermissions lists all unique permissions from all roles
+// Note: Permissions are now stored as JSONB arrays in roles table
 func (r *RoleRepository) ListPermissions(ctx context.Context) ([]*domain.Permission, error) {
-	query := `
-		SELECT id, name, description, category, is_admin_only, created_at
-		FROM permissions
-		ORDER BY category, name
-	`
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	var permissions []*domain.Permission
-	if err := r.db.SelectContext(ctx, &permissions, query); err != nil {
+	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		// Collect all unique permissions from all roles
+		query := `
+			SELECT permissions FROM roles WHERE deleted_at IS NULL
+		`
+		rows, err := r.db.QueryContext(ctx, query)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		permSet := make(map[string]bool)
+		for rows.Next() {
+			var permsJSON []byte
+			if err := rows.Scan(&permsJSON); err != nil {
+				continue
+			}
+			var permNames []string
+			if err := json.Unmarshal(permsJSON, &permNames); err != nil {
+				continue
+			}
+			for _, permName := range permNames {
+				permSet[permName] = true
+			}
+		}
+
+		for permName := range permSet {
+			permissions = append(permissions, &domain.Permission{Name: permName})
+		}
+		return nil
+	})
+
+	if err != nil {
 		return nil, err
 	}
 

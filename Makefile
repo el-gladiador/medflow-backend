@@ -99,6 +99,38 @@ migrate-up-%: ## Run migrations for a specific service (e.g., make migrate-up-au
 migrate-down-%: ## Rollback migrations for a specific service
 	@migrate -path migrations/$* -database "postgres://medflow:devpassword@localhost:$(shell case $* in auth) echo 5433;; user) echo 5434;; staff) echo 5435;; inventory) echo 5436;; esac)/medflow_$*?sslmode=disable" down 1
 
+## Bridge Model: Tenant Schema Migrations (per service)
+
+# User service tenant migrations
+migrate-user-tenant-up: ## Create tenant schema in user DB (Usage: TENANT=test_practice)
+	@if [ -z "$(TENANT)" ]; then echo "Error: TENANT not specified. Usage: make migrate-user-tenant-up TENANT=test_practice"; exit 1; fi
+	@echo "Creating tenant schema in user service for tenant_$(TENANT)..."
+	@docker exec -i medflow-db-users psql -U medflow -d medflow_users -c "CREATE SCHEMA IF NOT EXISTS tenant_$(TENANT);"
+	@~/go/bin/migrate -path migrations/user/tenant -database "postgresql://medflow:devpassword@localhost:5434/medflow_users?sslmode=disable&search_path=tenant_$(TENANT)" up
+
+# Staff service tenant migrations
+migrate-staff-tenant-up: ## Create tenant schema in staff DB (Usage: TENANT=test_practice)
+	@if [ -z "$(TENANT)" ]; then echo "Error: TENANT not specified. Usage: make migrate-staff-tenant-up TENANT=test_practice"; exit 1; fi
+	@echo "Creating tenant schema in staff service for tenant_$(TENANT)..."
+	@docker exec -i medflow-db-staff psql -U medflow -d medflow_staff -c "CREATE SCHEMA IF NOT EXISTS tenant_$(TENANT);"
+	@~/go/bin/migrate -path migrations/staff/tenant -database "postgresql://medflow:devpassword@localhost:5435/medflow_staff?sslmode=disable&search_path=tenant_$(TENANT)" up
+
+# Inventory service tenant migrations
+migrate-inventory-tenant-up: ## Create tenant schema in inventory DB (Usage: TENANT=test_practice)
+	@if [ -z "$(TENANT)" ]; then echo "Error: TENANT not specified. Usage: make migrate-inventory-tenant-up TENANT=test_practice"; exit 1; fi
+	@echo "Creating tenant schema in inventory service for tenant_$(TENANT)..."
+	@docker exec -i medflow-db-inventory psql -U medflow -d medflow_inventory -c "CREATE SCHEMA IF NOT EXISTS tenant_$(TENANT);"
+	@~/go/bin/migrate -path migrations/inventory/tenant -database "postgresql://medflow:devpassword@localhost:5436/medflow_inventory?sslmode=disable&search_path=tenant_$(TENANT)" up
+
+# Create tenant across ALL services
+create-tenant: ## Create tenant across all service databases (Usage: TENANT=test_practice)
+	@if [ -z "$(TENANT)" ]; then echo "Error: TENANT not specified. Usage: make create-tenant TENANT=test_practice"; exit 1; fi
+	@echo "Creating tenant_$(TENANT) across all services..."
+	@make migrate-user-tenant-up TENANT=$(TENANT)
+	@make migrate-staff-tenant-up TENANT=$(TENANT)
+	@make migrate-inventory-tenant-up TENANT=$(TENANT)
+	@echo "Tenant tenant_$(TENANT) created successfully across all services!"
+
 ## Development Workflow
 
 dev: infra-up ## Start infrastructure and run all services locally

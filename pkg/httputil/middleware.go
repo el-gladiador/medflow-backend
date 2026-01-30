@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/medflow/medflow-backend/pkg/logger"
+	"github.com/medflow/medflow-backend/pkg/tenant"
 )
 
 type contextKey string
@@ -130,4 +131,43 @@ func WithUserContext(ctx context.Context, userID, email, role string) context.Co
 	ctx = context.WithValue(ctx, UserEmailKey, email)
 	ctx = context.WithValue(ctx, UserRoleKey, role)
 	return ctx
+}
+
+// TenantMiddleware extracts tenant context from headers (set by API Gateway)
+// and adds it to the request context.
+//
+// This middleware is applied to all microservices (user, staff, inventory).
+// It ensures every request has tenant context for database schema isolation.
+//
+// Headers expected (set by gateway's AuthMiddleware):
+//   - X-Tenant-ID: Tenant UUID
+//   - X-Tenant-Slug: Tenant slug (e.g., "test-practice")
+//   - X-Tenant-Schema: Schema name (e.g., "tenant_test_practice")
+//
+// Security: Missing tenant context returns 403 Forbidden (fail-fast).
+// Exception: /health endpoints are allowed without tenant context for monitoring.
+func TenantMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip tenant validation for health check endpoints
+		if r.URL.Path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		tenantID := r.Header.Get("X-Tenant-ID")
+		tenantSlug := r.Header.Get("X-Tenant-Slug")
+		tenantSchema := r.Header.Get("X-Tenant-Schema")
+
+		// Validate tenant context is present
+		// This is CRITICAL for security - prevents cross-tenant data access
+		if tenantID == "" || tenantSchema == "" {
+			http.Error(w, `{"error":"missing tenant context"}`, http.StatusForbidden)
+			return
+		}
+
+		// Add tenant context to request
+		ctx := tenant.WithTenantContext(r.Context(), tenantID, tenantSlug, tenantSchema)
+
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }

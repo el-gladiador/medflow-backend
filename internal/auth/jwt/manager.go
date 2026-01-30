@@ -18,6 +18,11 @@ type Claims struct {
 	Role        string   `json:"role"`
 	Permissions []string `json:"permissions,omitempty"`
 	IsManager   bool     `json:"is_manager"`
+
+	// Tenant context - added for multi-tenancy support
+	TenantID     string `json:"tenant_id"`
+	TenantSlug   string `json:"tenant_slug"`
+	TenantSchema string `json:"tenant_schema"`
 }
 
 // RefreshClaims represents refresh token claims
@@ -45,6 +50,11 @@ type UserInfo struct {
 	Role        string
 	Permissions []string
 	IsManager   bool
+
+	// Tenant context - populated during login
+	TenantID     string
+	TenantSlug   string
+	TenantSchema string
 }
 
 // TokenPair contains access and refresh tokens
@@ -77,6 +87,11 @@ func (m *Manager) GenerateTokenPair(user *UserInfo, sessionID string) (*TokenPai
 		Role:        user.Role,
 		Permissions: user.Permissions,
 		IsManager:   user.IsManager,
+
+		// Include tenant context in JWT
+		TenantID:     user.TenantID,
+		TenantSlug:   user.TenantSlug,
+		TenantSchema: user.TenantSchema,
 	}
 
 	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)

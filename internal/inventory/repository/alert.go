@@ -3,31 +3,37 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/medflow/medflow-backend/pkg/database"
 	"github.com/medflow/medflow-backend/pkg/errors"
+	"github.com/medflow/medflow-backend/pkg/tenant"
 )
 
 // InventoryAlert represents an inventory alert
+// Actual DB schema: item_id, batch_id, alert_type, severity, message, status, acknowledged_at, acknowledged_by, resolved_at, resolved_by
 type InventoryAlert struct {
-	ID              string     `db:"id" json:"id"`
-	AlertType       string     `db:"alert_type" json:"alert_type"`
-	ItemID          string     `db:"item_id" json:"item_id"`
-	ItemName        string     `db:"item_name" json:"item_name"`
-	BatchID         *string    `db:"batch_id" json:"batch_id,omitempty"`
-	BatchNumber     *string    `db:"batch_number" json:"batch_number,omitempty"`
-	Severity        string     `db:"severity" json:"severity"`
-	Message         string     `db:"message" json:"message"`
-	ExpiryDate      *time.Time `db:"expiry_date" json:"expiry_date,omitempty"`
-	DaysUntilExpiry *int       `db:"days_until_expiry" json:"days_until_expiry,omitempty"`
-	CurrentStock    *int       `db:"current_stock" json:"current_stock,omitempty"`
-	MinStock        *int       `db:"min_stock" json:"min_stock,omitempty"`
-	IsAcknowledged  bool       `db:"is_acknowledged" json:"is_acknowledged"`
-	AcknowledgedBy  *string    `db:"acknowledged_by" json:"acknowledged_by,omitempty"`
-	AcknowledgedAt  *time.Time `db:"acknowledged_at" json:"acknowledged_at,omitempty"`
-	CreatedAt       time.Time  `db:"created_at" json:"created_at"`
+	ID             string     `db:"id" json:"id"`
+	ItemID         string     `db:"item_id" json:"item_id"`
+	BatchID        *string    `db:"batch_id" json:"batch_id,omitempty"`
+	AlertType      string     `db:"alert_type" json:"alert_type"`
+	Severity       string     `db:"severity" json:"severity"`
+	Message        string     `db:"message" json:"message"`
+	Status         string     `db:"status" json:"status"` // 'open', 'acknowledged', 'resolved'
+	AcknowledgedAt *time.Time `db:"acknowledged_at" json:"acknowledged_at,omitempty"`
+	AcknowledgedBy *string    `db:"acknowledged_by" json:"acknowledged_by,omitempty"`
+	ResolvedAt     *time.Time `db:"resolved_at" json:"resolved_at,omitempty"`
+	ResolvedBy     *string    `db:"resolved_by" json:"resolved_by,omitempty"`
+	CreatedAt      time.Time  `db:"created_at" json:"created_at"`
+	// Computed fields for API compatibility (not in DB)
+	ItemName        string     `db:"-" json:"item_name,omitempty"`
+	BatchNumber     *string    `db:"-" json:"batch_number,omitempty"`
+	ExpiryDate      *time.Time `db:"-" json:"expiry_date,omitempty"`
+	DaysUntilExpiry *int       `db:"-" json:"days_until_expiry,omitempty"`
+	CurrentStock    *int       `db:"-" json:"current_stock,omitempty"`
+	MinStock        *int       `db:"-" json:"min_stock,omitempty"`
 }
 
 // AlertRepository handles alert persistence
@@ -41,74 +47,116 @@ func NewAlertRepository(db *database.DB) *AlertRepository {
 }
 
 // Create creates a new alert
+// TENANT-ISOLATED: Inserts into the tenant's schema
 func (r *AlertRepository) Create(ctx context.Context, alert *InventoryAlert) error {
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
+		return err
+	}
+
 	if alert.ID == "" {
 		alert.ID = uuid.New().String()
 	}
 
-	query := `
-		INSERT INTO inventory_alerts (
-			id, alert_type, item_id, item_name, batch_id, batch_number, severity, message,
-			expiry_date, days_until_expiry, current_stock, min_stock
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		RETURNING created_at
-	`
+	if alert.Status == "" {
+		alert.Status = "open"
+	}
 
-	return r.db.QueryRowxContext(ctx, query,
-		alert.ID, alert.AlertType, alert.ItemID, alert.ItemName, alert.BatchID,
-		alert.BatchNumber, alert.Severity, alert.Message, alert.ExpiryDate,
-		alert.DaysUntilExpiry, alert.CurrentStock, alert.MinStock,
-	).Scan(&alert.CreatedAt)
+	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		query := `
+			INSERT INTO inventory_alerts (id, item_id, batch_id, alert_type, severity, message, status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			RETURNING created_at
+		`
+
+		return r.db.QueryRowxContext(ctx, query,
+			alert.ID, alert.ItemID, alert.BatchID, alert.AlertType,
+			alert.Severity, alert.Message, alert.Status,
+		).Scan(&alert.CreatedAt)
+	})
 }
 
 // GetByID gets an alert by ID
+// TENANT-ISOLATED: Queries only the tenant's schema
 func (r *AlertRepository) GetByID(ctx context.Context, id string) (*InventoryAlert, error) {
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	var alert InventoryAlert
-	query := `SELECT * FROM inventory_alerts WHERE id = $1`
-	if err := r.db.GetContext(ctx, &alert, query, id); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, errors.NotFound("alert")
-		}
+	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		query := `
+			SELECT id, item_id, batch_id, alert_type, severity, message, status,
+			       acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at
+			FROM inventory_alerts WHERE id = $1
+		`
+		return r.db.GetContext(ctx, &alert, query, id)
+	})
+
+	if err == sql.ErrNoRows {
+		return nil, errors.NotFound("alert")
+	}
+	if err != nil {
 		return nil, err
 	}
 	return &alert, nil
 }
 
 // List lists alerts with filtering
+// TENANT-ISOLATED: Returns only alerts from the tenant's schema
 func (r *AlertRepository) List(ctx context.Context, acknowledged *bool, alertType string, page, perPage int) ([]*InventoryAlert, int64, error) {
-	var total int64
-	args := []interface{}{}
-	argIndex := 1
-
-	countQuery := `SELECT COUNT(*) FROM inventory_alerts WHERE 1=1`
-	query := `SELECT * FROM inventory_alerts WHERE 1=1`
-
-	if acknowledged != nil {
-		countQuery += ` AND is_acknowledged = $` + string(rune('0'+argIndex))
-		query += ` AND is_acknowledged = $` + string(rune('0'+argIndex))
-		args = append(args, *acknowledged)
-		argIndex++
-	}
-
-	if alertType != "" {
-		countQuery += ` AND alert_type = $` + string(rune('0'+argIndex))
-		query += ` AND alert_type = $` + string(rune('0'+argIndex))
-		args = append(args, alertType)
-		argIndex++
-	}
-
-	if err := r.db.GetContext(ctx, &total, countQuery, args...); err != nil {
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
 		return nil, 0, err
 	}
 
-	query += ` ORDER BY CASE severity WHEN 'critical' THEN 0 ELSE 1 END, created_at DESC`
-
-	offset := (page - 1) * perPage
-	query += ` LIMIT $` + string(rune('0'+argIndex)) + ` OFFSET $` + string(rune('0'+argIndex+1))
-	args = append(args, perPage, offset)
-
+	var total int64
 	var alerts []*InventoryAlert
-	if err := r.db.SelectContext(ctx, &alerts, query, args...); err != nil {
+
+	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		args := []interface{}{}
+		argIndex := 1
+
+		countQuery := `SELECT COUNT(*) FROM inventory_alerts WHERE 1=1`
+		query := `SELECT id, item_id, batch_id, alert_type, severity, message, status,
+		          acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at
+		          FROM inventory_alerts WHERE 1=1`
+
+		if acknowledged != nil {
+			if *acknowledged {
+				countQuery += fmt.Sprintf(` AND status = $%d`, argIndex)
+				query += fmt.Sprintf(` AND status = $%d`, argIndex)
+				args = append(args, "acknowledged")
+			} else {
+				countQuery += fmt.Sprintf(` AND status = $%d`, argIndex)
+				query += fmt.Sprintf(` AND status = $%d`, argIndex)
+				args = append(args, "open")
+			}
+			argIndex++
+		}
+
+		if alertType != "" {
+			countQuery += fmt.Sprintf(` AND alert_type = $%d`, argIndex)
+			query += fmt.Sprintf(` AND alert_type = $%d`, argIndex)
+			args = append(args, alertType)
+			argIndex++
+		}
+
+		if err := r.db.GetContext(ctx, &total, countQuery, args...); err != nil {
+			return err
+		}
+
+		query += ` ORDER BY CASE severity WHEN 'critical' THEN 0 ELSE 1 END, created_at DESC`
+
+		offset := (page - 1) * perPage
+		query += fmt.Sprintf(` LIMIT $%d OFFSET $%d`, argIndex, argIndex+1)
+		args = append(args, perPage, offset)
+
+		return r.db.SelectContext(ctx, &alerts, query, args...)
+	})
+
+	if err != nil {
 		return nil, 0, err
 	}
 
@@ -116,38 +164,64 @@ func (r *AlertRepository) List(ctx context.Context, acknowledged *bool, alertTyp
 }
 
 // Acknowledge acknowledges an alert
+// TENANT-ISOLATED: Updates only in the tenant's schema
 func (r *AlertRepository) Acknowledge(ctx context.Context, id, userID string) error {
-	query := `
-		UPDATE inventory_alerts
-		SET is_acknowledged = true, acknowledged_by = $2, acknowledged_at = NOW()
-		WHERE id = $1
-	`
-
-	result, err := r.db.ExecContext(ctx, query, id, userID)
+	tenantSchema, err := tenant.TenantSchema(ctx)
 	if err != nil {
 		return err
 	}
 
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
-		return errors.NotFound("alert")
+	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		query := `
+			UPDATE inventory_alerts
+			SET status = 'acknowledged', acknowledged_by = $2, acknowledged_at = NOW()
+			WHERE id = $1
+		`
+
+		result, err := r.db.ExecContext(ctx, query, id, userID)
+		if err != nil {
+			return err
+		}
+
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			return errors.NotFound("alert")
+		}
+
+		return nil
+	})
+}
+
+// DeleteOld deletes old resolved alerts
+// TENANT-ISOLATED: Deletes only from the tenant's schema
+func (r *AlertRepository) DeleteOld(ctx context.Context, olderThan time.Duration) error {
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
+		return err
 	}
 
-	return nil
+	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		query := `DELETE FROM inventory_alerts WHERE status = 'resolved' AND resolved_at < $1`
+		_, err := r.db.ExecContext(ctx, query, time.Now().Add(-olderThan))
+		return err
+	})
 }
 
-// DeleteOld deletes old acknowledged alerts
-func (r *AlertRepository) DeleteOld(ctx context.Context, olderThan time.Duration) error {
-	query := `DELETE FROM inventory_alerts WHERE is_acknowledged = true AND acknowledged_at < $1`
-	_, err := r.db.ExecContext(ctx, query, time.Now().Add(-olderThan))
-	return err
-}
-
-// GetUnacknowledgedCount gets count of unacknowledged alerts
+// GetUnacknowledgedCount gets count of open alerts
+// TENANT-ISOLATED: Queries only the tenant's schema
 func (r *AlertRepository) GetUnacknowledgedCount(ctx context.Context) (int64, error) {
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
+		return 0, err
+	}
+
 	var count int64
-	query := `SELECT COUNT(*) FROM inventory_alerts WHERE is_acknowledged = false`
-	if err := r.db.GetContext(ctx, &count, query); err != nil {
+	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		query := `SELECT COUNT(*) FROM inventory_alerts WHERE status = 'open'`
+		return r.db.GetContext(ctx, &count, query)
+	})
+
+	if err != nil {
 		return 0, err
 	}
 	return count, nil

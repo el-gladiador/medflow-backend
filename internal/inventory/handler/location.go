@@ -61,7 +61,6 @@ func (h *LocationHandler) CreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	room.IsActive = true
 	if err := h.repo.CreateRoom(r.Context(), &room); err != nil {
 		httputil.Error(w, err)
 		return
@@ -134,7 +133,6 @@ func (h *LocationHandler) CreateCabinet(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	cabinet.IsActive = true
 	if err := h.repo.CreateCabinet(r.Context(), &cabinet); err != nil {
 		httputil.Error(w, err)
 		return
@@ -207,7 +205,6 @@ func (h *LocationHandler) CreateShelf(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shelf.IsActive = true
 	if err := h.repo.CreateShelf(r.Context(), &shelf); err != nil {
 		httputil.Error(w, err)
 		return

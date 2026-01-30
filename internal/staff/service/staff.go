@@ -112,7 +112,7 @@ func (s *StaffService) SaveFinancials(ctx context.Context, fin *repository.Emplo
 	}
 
 	// Validate Tax ID
-	result = s.validator.ValidateTaxID(fin.SteuerID)
+	result = s.validator.ValidateTaxID(fin.TaxID)
 	if !result.Valid {
 		return &ValidationError{Field: "steuer_id", Message: result.Message}
 	}

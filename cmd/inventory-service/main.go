@@ -93,6 +93,7 @@ func main() {
 	r.Use(httputil.RequestID)
 	r.Use(httputil.Logger(log))
 	r.Use(httputil.Recoverer(log))
+	r.Use(httputil.TenantMiddleware) // Extract tenant context from headers
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {

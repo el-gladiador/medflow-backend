@@ -59,6 +59,11 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *UserHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
+	// Support /users/me to get current user
+	if id == "me" {
+		id = r.Header.Get("X-User-ID")
+	}
+
 	user, err := h.service.GetByID(r.Context(), id)
 	if err != nil {
 		httputil.Error(w, err)
@@ -314,22 +319,31 @@ func (h *UserHandler) ValidateCredentials(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	user, err := h.service.ValidateCredentials(r.Context(), req.Email, req.Password)
+	user, tenantInfo, err := h.service.ValidateCredentials(r.Context(), req.Email, req.Password)
 	if err != nil {
 		h.logger.Error().Err(err).Str("email", req.Email).Msg("validate credentials failed")
 		httputil.Error(w, err)
 		return
 	}
 
-	// Return user info for auth service
+	// Extract permissions from role and overrides
+	permissions := user.GetEffectivePermissions()
+
+	// Return user info WITH tenant context for auth service
 	response := map[string]interface{}{
-		"id":          user.ID,
-		"email":       user.Email,
-		"name":        user.Name,
-		"avatar":      user.Avatar,
-		"role":        user.Role.Name,
-		"permissions": user.GetEffectivePermissions(),
+		"id":     user.ID,
+		"email":  user.Email,
+		"name":   user.Name,
+		"avatar": user.Avatar,
+		"role":   user.Role.Name,
+
+		"permissions": permissions,
 		"is_manager":  user.Role.IsManager,
+
+		// Tenant context - critical for multi-tenancy
+		"tenant_id":     tenantInfo.ID,
+		"tenant_slug":   tenantInfo.Slug,
+		"tenant_schema": tenantInfo.SchemaName,
 	}
 
 	httputil.JSON(w, http.StatusOK, response)

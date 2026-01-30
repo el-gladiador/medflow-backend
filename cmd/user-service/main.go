@@ -76,13 +76,13 @@ func main() {
 	// Create router
 	r := chi.NewRouter()
 
-	// Middleware
+	// Global middleware (no tenant required)
 	r.Use(middleware.RealIP)
 	r.Use(httputil.RequestID)
 	r.Use(httputil.Logger(log))
 	r.Use(httputil.Recoverer(log))
 
-	// Health check
+	// Health check (no tenant required)
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		httputil.JSON(w, http.StatusOK, map[string]interface{}{
 			"status":   "healthy",
@@ -92,13 +92,13 @@ func main() {
 		})
 	})
 
-	// Internal endpoints (for service-to-service communication)
+	// Internal endpoints (no tenant required - used during login to find tenant)
 	r.Route("/api/v1/internal", func(r chi.Router) {
 		r.Post("/validate-credentials", userHandler.ValidateCredentials)
 		r.Get("/users/{id}", userHandler.GetUserInternal)
 	})
 
-	// Public endpoints (no auth required)
+	// Public endpoints (no tenant required)
 	r.Route("/api/v1/public", func(r chi.Router) {
 		// Get invitation info by token (for acceptance page)
 		r.Get("/invitations/token/{token}", inviteHandler.GetByToken)
@@ -106,8 +106,10 @@ func main() {
 		r.Post("/invitations/token/{token}/accept", inviteHandler.Accept)
 	})
 
-	// Public API endpoints
+	// Protected API endpoints (tenant required)
 	r.Route("/api/v1", func(r chi.Router) {
+		// Apply tenant middleware to all protected routes
+		r.Use(httputil.TenantMiddleware)
 		// Users
 		r.Route("/users", func(r chi.Router) {
 			r.Get("/", userHandler.List)

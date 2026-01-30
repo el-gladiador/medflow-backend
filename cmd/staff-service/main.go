@@ -86,13 +86,14 @@ func main() {
 	// Create router
 	r := chi.NewRouter()
 
-	// Middleware
+	// Global middleware
 	r.Use(middleware.RealIP)
 	r.Use(httputil.RequestID)
 	r.Use(httputil.Logger(log))
 	r.Use(httputil.Recoverer(log))
+	r.Use(httputil.TenantMiddleware) // Tenant middleware with /health exception
 
-	// Health check
+	// Health check (no tenant required - handled by middleware)
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		httputil.JSON(w, http.StatusOK, map[string]interface{}{
 			"status":   "healthy",
@@ -102,7 +103,7 @@ func main() {
 		})
 	})
 
-	// API routes
+	// API routes (tenant required)
 	r.Route("/api/v1/staff", func(r chi.Router) {
 		// Employee routes
 		r.Route("/employees", func(r chi.Router) {

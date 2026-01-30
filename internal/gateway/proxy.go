@@ -13,6 +13,7 @@ import (
 	"github.com/medflow/medflow-backend/pkg/errors"
 	pkghttp "github.com/medflow/medflow-backend/pkg/httputil"
 	"github.com/medflow/medflow-backend/pkg/logger"
+	"github.com/medflow/medflow-backend/pkg/tenant"
 )
 
 // Proxy handles reverse proxying to backend services
@@ -131,13 +132,41 @@ func (p *Proxy) AuthMiddleware(next http.Handler) http.Handler {
 		email, _ := claims["email"].(string)
 		role, _ := claims["role"].(string)
 
+		// Extract tenant info from claims (NEW - multi-tenancy support)
+		tenantID, _ := claims["tenant_id"].(string)
+		tenantSlug, _ := claims["tenant_slug"].(string)
+		tenantSchema, _ := claims["tenant_schema"].(string)
+
+		// Validate tenant context is present (CRITICAL for multi-tenancy security)
+		// For now, we log a warning for old tokens without tenant context
+		// TODO: Uncomment the error return below to enforce tenant requirement after full rollout
+		if tenantID == "" || tenantSchema == "" {
+			p.log.Warn().
+				Str("user_id", userID).
+				Msg("JWT missing tenant context - old token or misconfigured")
+			// pkghttp.Error(w, errors.Forbidden("missing tenant context in token"))
+			// return
+		}
+
 		// Add user info to request context
 		ctx := pkghttp.WithUserContext(r.Context(), userID, email, role)
+
+		// Add tenant info to request context (NEW)
+		if tenantID != "" {
+			ctx = tenant.WithTenantContext(ctx, tenantID, tenantSlug, tenantSchema)
+		}
 
 		// Add user info to headers for downstream services
 		r.Header.Set("X-User-ID", userID)
 		r.Header.Set("X-User-Email", email)
 		r.Header.Set("X-User-Role", role)
+
+		// Add tenant info to headers for downstream services (NEW)
+		if tenantID != "" {
+			r.Header.Set("X-Tenant-ID", tenantID)
+			r.Header.Set("X-Tenant-Slug", tenantSlug)
+			r.Header.Set("X-Tenant-Schema", tenantSchema)
+		}
 
 		// Add permissions if present
 		if perms, ok := claims["permissions"].([]interface{}); ok {

@@ -63,6 +63,11 @@ type UserInfo struct {
 	Role        string   `json:"role"`
 	Permissions []string `json:"permissions"`
 	IsManager   bool     `json:"is_manager"`
+
+	// Tenant context - populated by user service during login
+	TenantID     string `json:"tenant_id,omitempty"`
+	TenantSlug   string `json:"tenant_slug,omitempty"`
+	TenantSchema string `json:"tenant_schema,omitempty"`
 }
 
 // Login authenticates a user and returns tokens
@@ -75,7 +80,7 @@ func (s *AuthService) Login(ctx context.Context, req *LoginRequest, userAgent, i
 
 	expiresAt := time.Now().Add(s.jwtManager.GetRefreshExpiry())
 
-	// Generate tokens
+	// Generate tokens with tenant context
 	tokenInfo := &jwt.UserInfo{
 		ID:          user.ID,
 		Email:       user.Email,
@@ -83,6 +88,11 @@ func (s *AuthService) Login(ctx context.Context, req *LoginRequest, userAgent, i
 		Role:        user.Role,
 		Permissions: user.Permissions,
 		IsManager:   user.IsManager,
+
+		// Pass tenant context from user service to JWT
+		TenantID:     user.TenantID,
+		TenantSlug:   user.TenantSlug,
+		TenantSchema: user.TenantSchema,
 	}
 
 	// Generate a session ID first

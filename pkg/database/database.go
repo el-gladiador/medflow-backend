@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -93,4 +94,60 @@ func (db *DB) Transaction(ctx context.Context, fn func(*sqlx.Tx) error) error {
 	}
 
 	return nil
+}
+
+// GetContext gets a single record, using transaction from context if available
+func (db *DB) GetContext(ctx context.Context, dest interface{}, query string, args ...interface{}) error {
+	if tx := db.getTx(ctx); tx != nil {
+		return tx.GetContext(ctx, dest, query, args...)
+	}
+	return db.DB.GetContext(ctx, dest, query, args...)
+}
+
+// SelectContext gets multiple records, using transaction from context if available
+func (db *DB) SelectContext(ctx context.Context, dest interface{}, query string, args ...interface{}) error {
+	if tx := db.getTx(ctx); tx != nil {
+		return tx.SelectContext(ctx, dest, query, args...)
+	}
+	return db.DB.SelectContext(ctx, dest, query, args...)
+}
+
+// QueryRowxContext queries a single row, using transaction from context if available
+func (db *DB) QueryRowxContext(ctx context.Context, query string, args ...interface{}) *sqlx.Row {
+	if tx := db.getTx(ctx); tx != nil {
+		return tx.QueryRowxContext(ctx, query, args...)
+	}
+	return db.DB.QueryRowxContext(ctx, query, args...)
+}
+
+// QueryContext executes a query, using transaction from context if available
+func (db *DB) QueryContext(ctx context.Context, query string, args ...interface{}) (*sqlx.Rows, error) {
+	if tx := db.getTx(ctx); tx != nil {
+		return tx.QueryxContext(ctx, query, args...)
+	}
+	return db.DB.QueryxContext(ctx, query, args...)
+}
+
+// QueryxContext executes a query, using transaction from context if available
+func (db *DB) QueryxContext(ctx context.Context, query string, args ...interface{}) (*sqlx.Rows, error) {
+	if tx := db.getTx(ctx); tx != nil {
+		return tx.QueryxContext(ctx, query, args...)
+	}
+	return db.DB.QueryxContext(ctx, query, args...)
+}
+
+// QueryRowContext queries a single row, using transaction from context if available
+func (db *DB) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sqlx.Row {
+	if tx := db.getTx(ctx); tx != nil {
+		return tx.QueryRowxContext(ctx, query, args...)
+	}
+	return db.DB.QueryRowxContext(ctx, query, args...)
+}
+
+// ExecContext executes a query, using transaction from context if available
+func (db *DB) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	if tx := db.getTx(ctx); tx != nil {
+		return tx.ExecContext(ctx, query, args...)
+	}
+	return db.DB.ExecContext(ctx, query, args...)
 }
