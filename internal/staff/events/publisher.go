@@ -32,7 +32,7 @@ func (p *StaffEventPublisher) PublishEmployeeCreated(ctx context.Context, emp *r
 	data := messaging.EmployeeCreatedEvent{
 		EmployeeID: emp.ID,
 		UserID:     emp.UserID,
-		Name:       emp.Vorname + " " + emp.Nachname,
+		Name:       emp.FirstName + " " + emp.LastName,
 	}
 
 	if err := p.publisher.Publish(ctx, messaging.EventEmployeeCreated, data); err != nil {
@@ -44,7 +44,7 @@ func (p *StaffEventPublisher) PublishEmployeeCreated(ctx context.Context, emp *r
 func (p *StaffEventPublisher) PublishEmployeeUpdated(ctx context.Context, emp *repository.Employee) {
 	data := messaging.EmployeeUpdatedEvent{
 		EmployeeID: emp.ID,
-		Fields:     map[string]any{"name": emp.Vorname + " " + emp.Nachname},
+		Fields:     map[string]any{"name": emp.FirstName + " " + emp.LastName},
 	}
 
 	if err := p.publisher.Publish(ctx, messaging.EventEmployeeUpdated, data); err != nil {

@@ -61,8 +61,14 @@ func (h *BatchHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	batch.ItemID = itemID
-	batch.Status = "active"
+	batch.Status = "available"
+	// Copy quantity to current_quantity for backwards compatibility
+	if batch.CurrentQuantity == 0 && batch.Quantity > 0 {
+		batch.CurrentQuantity = batch.Quantity
+		batch.InitialQuantity = batch.Quantity
+	}
 	if err := h.service.CreateBatch(r.Context(), &batch); err != nil {
+		h.logger.Error().Err(err).Str("item_id", itemID).Msg("failed to create batch")
 		httputil.Error(w, err)
 		return
 	}

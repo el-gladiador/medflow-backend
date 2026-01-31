@@ -105,16 +105,20 @@ func (s *StaffService) GetFinancials(ctx context.Context, employeeID string) (*r
 
 // SaveFinancials saves an employee's financial data
 func (s *StaffService) SaveFinancials(ctx context.Context, fin *repository.EmployeeFinancials) error {
-	// Validate IBAN
-	result := s.validator.ValidateIBAN(fin.IBAN)
-	if !result.Valid {
-		return &ValidationError{Field: "iban", Message: result.Message}
+	// Validate IBAN if provided
+	if fin.IBAN != nil && *fin.IBAN != "" {
+		result := s.validator.ValidateIBAN(*fin.IBAN)
+		if !result.Valid {
+			return &ValidationError{Field: "iban", Message: result.Message}
+		}
 	}
 
-	// Validate Tax ID
-	result = s.validator.ValidateTaxID(fin.TaxID)
-	if !result.Valid {
-		return &ValidationError{Field: "steuer_id", Message: result.Message}
+	// Validate Tax ID (SteuerID) if provided
+	if fin.TaxID != nil && *fin.TaxID != "" {
+		result := s.validator.ValidateTaxID(*fin.TaxID)
+		if !result.Valid {
+			return &ValidationError{Field: "tax_id", Message: result.Message}
+		}
 	}
 
 	return s.employeeRepo.SaveFinancials(ctx, fin)

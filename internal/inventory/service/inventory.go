@@ -218,7 +218,11 @@ func (s *InventoryService) GenerateExpiryAlerts(ctx context.Context) error {
 			continue
 		}
 
-		daysUntil := int(time.Until(batch.ExpiryDate).Hours() / 24)
+		if batch.ExpiryDate == nil {
+			continue
+		}
+
+		daysUntil := int(time.Until(*batch.ExpiryDate).Hours() / 24)
 
 		var alertType, severity string
 		if daysUntil < 0 {
@@ -240,7 +244,7 @@ func (s *InventoryService) GenerateExpiryAlerts(ctx context.Context) error {
 			BatchNumber:     &batch.BatchNumber,
 			Severity:        severity,
 			Message:         fmt.Sprintf("%s batch %s expires in %d days", item.Name, batch.BatchNumber, daysUntil),
-			ExpiryDate:      &batch.ExpiryDate,
+			ExpiryDate:      batch.ExpiryDate,
 			DaysUntilExpiry: &daysUntil,
 		}
 
@@ -291,12 +295,14 @@ func (s *InventoryService) GetDashboardStats(ctx context.Context) (*DashboardSta
 		for _, b := range itemBatches {
 			totalStock += b.Quantity
 
-			// Check expiry
-			daysUntil := int(b.ExpiryDate.Sub(now).Hours() / 24)
-			if daysUntil < 0 {
-				stats.ExpiredCount++
-			} else if daysUntil <= 30 {
-				stats.ExpiringCount++
+			// Check expiry - only if ExpiryDate is set
+			if b.ExpiryDate != nil {
+				daysUntil := int(b.ExpiryDate.Sub(now).Hours() / 24)
+				if daysUntil < 0 {
+					stats.ExpiredCount++
+				} else if daysUntil <= 30 {
+					stats.ExpiringCount++
+				}
 			}
 		}
 
@@ -326,9 +332,9 @@ func (s *InventoryService) enrichItem(item *repository.InventoryItem, batches []
 	// Find nearest expiry
 	var nearestExpiry *time.Time
 	for _, b := range batches {
-		if b.Quantity > 0 {
+		if b.Quantity > 0 && b.ExpiryDate != nil {
 			if nearestExpiry == nil || b.ExpiryDate.Before(*nearestExpiry) {
-				nearestExpiry = &b.ExpiryDate
+				nearestExpiry = b.ExpiryDate
 			}
 		}
 	}

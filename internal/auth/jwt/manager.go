@@ -30,6 +30,11 @@ type RefreshClaims struct {
 	jwt.RegisteredClaims
 	UserID    string `json:"user_id"`
 	SessionID string `json:"session_id"`
+
+	// Tenant context - needed for token refresh to call user service
+	TenantID     string `json:"tenant_id"`
+	TenantSlug   string `json:"tenant_slug"`
+	TenantSchema string `json:"tenant_schema"`
 }
 
 // Manager handles JWT operations
@@ -111,6 +116,11 @@ func (m *Manager) GenerateTokenPair(user *UserInfo, sessionID string) (*TokenPai
 		},
 		UserID:    user.ID,
 		SessionID: sessionID,
+
+		// Include tenant context for refresh flow
+		TenantID:     user.TenantID,
+		TenantSlug:   user.TenantSlug,
+		TenantSchema: user.TenantSchema,
 	}
 
 	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)

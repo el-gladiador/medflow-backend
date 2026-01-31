@@ -12,95 +12,109 @@ import (
 )
 
 // Employee represents an employee
-// Note: DB uses English column names, JSON uses German for API compatibility
-// Fields not in current English schema are marked with db:"-" and ignored in queries
+// DB fields use English names to match the database schema
+// JSON fields use the same English names for API consistency
 type Employee struct {
-	// Core fields (mapped to DB)
-	ID              string     `db:"id" json:"id"`
-	UserID          *string    `db:"user_id" json:"user_id,omitempty"`
-	Personalnummer  *string    `db:"employee_number" json:"personalnummer,omitempty"`
-	Vorname         string     `db:"first_name" json:"vorname"`
-	Nachname        string     `db:"last_name" json:"nachname"`
-	Profilbild      *string    `db:"avatar_url" json:"profilbild,omitempty"`
-	Geburtsdatum    *time.Time `db:"date_of_birth" json:"geburtsdatum,omitempty"`
-	Geschlecht      *string    `db:"gender" json:"geschlecht,omitempty"`
-	Nationalitaet   *string    `db:"nationality" json:"nationalitaet,omitempty"`
-	Rolle           *string    `db:"job_title" json:"rolle,omitempty"`
-	Abteilung       *string    `db:"department" json:"abteilung,omitempty"`
-	Anstellungsart  string     `db:"employment_type" json:"anstellungsart"`
-	Eintrittsdatum  time.Time  `db:"hire_date" json:"eintrittsdatum"`
-	Probezeitende   *time.Time `db:"probation_end_date" json:"probezeitende,omitempty"`
-	Befristungsende *time.Time `db:"termination_date" json:"befristungsende,omitempty"`
-	Status          string     `db:"status" json:"status"`
-	Email           *string    `db:"email" json:"email,omitempty"`
-	Phone           *string    `db:"phone" json:"phone,omitempty"`
-	Mobile          *string    `db:"mobile" json:"mobile,omitempty"`
-	CreatedAt       time.Time  `db:"created_at" json:"created_at"`
-	UpdatedAt       time.Time  `db:"updated_at" json:"updated_at"`
-	DeletedAt       *time.Time `db:"deleted_at" json:"-"`
+	// Core identity
+	ID             string  `db:"id" json:"id"`
+	UserID         *string `db:"user_id" json:"user_id,omitempty"`
+	EmployeeNumber *string `db:"employee_number" json:"employee_number,omitempty"`
 
-	// Fields not in current schema (German-specific) - ignored in DB queries
-	Geburtsort        *string `db:"-" json:"geburtsort,omitempty"`
-	Familienstand     *string `db:"-" json:"familienstand,omitempty"`
-	Vertragsart       string  `db:"-" json:"vertragsart,omitempty"`
-	Wochenstunden     float64 `db:"-" json:"wochenstunden,omitempty"`
-	Urlaubstage       int     `db:"-" json:"urlaubstage,omitempty"`
-	Arbeitszeitmodell string  `db:"-" json:"arbeitszeitmodell,omitempty"`
-	IsActive          bool    `db:"-" json:"is_active,omitempty"`
+	// Personal info
+	FirstName   string     `db:"first_name" json:"first_name"`
+	LastName    string     `db:"last_name" json:"last_name"`
+	AvatarURL   *string    `db:"avatar_url" json:"avatar_url,omitempty"`
+	DateOfBirth *time.Time `db:"date_of_birth" json:"date_of_birth,omitempty"`
+	Gender      *string    `db:"gender" json:"gender,omitempty"`
+	Nationality *string    `db:"nationality" json:"nationality,omitempty"`
+
+	// Employment info
+	JobTitle       *string    `db:"job_title" json:"job_title,omitempty"`
+	Department     *string    `db:"department" json:"department,omitempty"`
+	EmploymentType string     `db:"employment_type" json:"employment_type"` // full_time, part_time, contractor, intern, temporary
+	HireDate       time.Time  `db:"hire_date" json:"hire_date"`
+	ProbationEnd   *time.Time `db:"probation_end_date" json:"probation_end_date,omitempty"`
+	TerminationDate *time.Time `db:"termination_date" json:"termination_date,omitempty"`
+
+	// Status and metadata
+	Status    string     `db:"status" json:"status"` // active, on_leave, suspended, terminated, pending
+	Notes     *string    `db:"notes" json:"notes,omitempty"`
+	CreatedAt time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time  `db:"updated_at" json:"updated_at"`
+	DeletedAt *time.Time `db:"deleted_at" json:"-"`
+	CreatedBy *string    `db:"created_by" json:"created_by,omitempty"`
+	UpdatedBy *string    `db:"updated_by" json:"updated_by,omitempty"`
+
+	// Transient fields for API convenience (not stored in employees table)
+	Email  *string `db:"email" json:"email,omitempty"`
+	Phone  *string `db:"phone" json:"phone,omitempty"`
+	Mobile *string `db:"mobile" json:"mobile,omitempty"`
+
+	// Legacy field aliases for backwards compatibility (use new names in new code)
+	// These are exported but deprecated
+	Vorname        string  `db:"-" json:"-"` // Use FirstName
+	Nachname       string  `db:"-" json:"-"` // Use LastName
+	Personalnummer string  `db:"-" json:"-"` // Use EmployeeNumber
+	Rolle          string  `db:"-" json:"-"` // Use JobTitle
+	Abteilung      *string `db:"-" json:"-"` // Use Department
+	Anstellungsart string  `db:"-" json:"-"` // Use EmploymentType
+	IsActive       bool    `db:"-" json:"-"` // Use Status == "active"
 }
 
 // EmployeeAddress represents an employee's address
-// Actual DB schema: address_type, street, house_number, address_line2, postal_code, city, state, country
 type EmployeeAddress struct {
-	ID           string    `db:"id" json:"id"`
-	EmployeeID   string    `db:"employee_id" json:"employee_id"`
-	AddressType  string    `db:"address_type" json:"address_type"`
-	Street       string    `db:"street" json:"strasse"`       // German JSON for API
-	HouseNumber  string    `db:"house_number" json:"hausnummer"`
-	AddressLine2 *string   `db:"address_line2" json:"zusatz,omitempty"`
-	PostalCode   string    `db:"postal_code" json:"plz"`
-	City         string    `db:"city" json:"ort"`
-	State        *string   `db:"state" json:"bundesland,omitempty"`
-	Country      string    `db:"country" json:"land"`
-	IsPrimary    bool      `db:"is_primary" json:"is_primary"`
-	CreatedAt    time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
+	ID          string    `db:"id" json:"id"`
+	EmployeeID  string    `db:"employee_id" json:"employee_id"`
+	AddressType string    `db:"address_type" json:"address_type"` // home, mailing, emergency
+	Street      string    `db:"street" json:"street"`
+	HouseNumber *string   `db:"house_number" json:"house_number,omitempty"`
+	AddressLine2 *string  `db:"address_line2" json:"address_line2,omitempty"`
+	PostalCode  string    `db:"postal_code" json:"postal_code"`
+	City        string    `db:"city" json:"city"`
+	State       *string   `db:"state" json:"state,omitempty"`
+	Country     string    `db:"country" json:"country"`
+	IsPrimary   bool      `db:"is_primary" json:"is_primary"`
+	CreatedAt   time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
 }
 
-// EmployeeContact represents employee contact information
-// Actual DB schema: contact_type, name, relationship, phone, email, is_primary
+// EmployeeContact represents employee emergency contact information
+// Note: This table stores emergency contacts, not the employee's own contact info
+// Employee's own email/phone are in the employees table
 type EmployeeContact struct {
 	ID           string    `db:"id" json:"id"`
 	EmployeeID   string    `db:"employee_id" json:"employee_id"`
-	ContactType  string    `db:"contact_type" json:"contact_type"`    // e.g., "emergency", "business"
-	Name         *string   `db:"name" json:"name,omitempty"`
+	ContactType  string    `db:"contact_type" json:"contact_type"` // emergency, family, doctor, other
+	Name         string    `db:"name" json:"name"`
 	Relationship *string   `db:"relationship" json:"relationship,omitempty"`
-	Phone        *string   `db:"phone" json:"phone,omitempty"`
+	Phone        string    `db:"phone" json:"phone"`
 	Email        *string   `db:"email" json:"email,omitempty"`
 	IsPrimary    bool      `db:"is_primary" json:"is_primary"`
 	CreatedAt    time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
 }
 
-// EmployeeFinancials represents employee financial data
-// Actual DB schema: iban, bic, bank_name, account_holder, tax_id, tax_class, church_tax,
-// child_allowance, salary_type, base_salary_cents, currency
+// EmployeeFinancials represents employee financial data (German payroll)
 type EmployeeFinancials struct {
-	ID              string   `db:"id" json:"id"`
-	EmployeeID      string   `db:"employee_id" json:"employee_id"`
-	AccountHolder   string   `db:"account_holder" json:"kontoinhaber"`  // German JSON for API
-	IBAN            string   `db:"iban" json:"iban"`
-	BIC             *string  `db:"bic" json:"bic,omitempty"`
-	BankName        *string  `db:"bank_name" json:"bankname,omitempty"`
-	TaxID           string   `db:"tax_id" json:"steuer_id"`
-	TaxClass        string   `db:"tax_class" json:"steuerklasse"`
-	ChurchTax       bool     `db:"church_tax" json:"kirchensteuer"`
-	ChildAllowance  *float64 `db:"child_allowance" json:"kinderfreibetrag,omitempty"`
-	SalaryType      *string  `db:"salary_type" json:"gehaltsart,omitempty"`
-	BaseSalaryCents *int     `db:"base_salary_cents" json:"grundgehalt_cents,omitempty"`
-	Currency        string   `db:"currency" json:"waehrung"`
-	CreatedAt       time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt       time.Time `db:"updated_at" json:"updated_at"`
+	ID             string   `db:"id" json:"id"`
+	EmployeeID     string   `db:"employee_id" json:"employee_id"`
+	IBAN           *string  `db:"iban" json:"iban,omitempty"`
+	BIC            *string  `db:"bic" json:"bic,omitempty"`
+	BankName       *string  `db:"bank_name" json:"bank_name,omitempty"`
+	AccountHolder  *string  `db:"account_holder" json:"account_holder,omitempty"`
+	TaxID          *string  `db:"tax_id" json:"tax_id,omitempty"`          // Steuer-ID (11 digits)
+	TaxClass       *string  `db:"tax_class" json:"tax_class,omitempty"`    // Steuerklasse (1-6)
+	ChurchTax      bool     `db:"church_tax" json:"church_tax"`
+	ChildAllowance *float64 `db:"child_allowance" json:"child_allowance,omitempty"` // Kinderfreibetrag
+	SalaryType     *string  `db:"salary_type" json:"salary_type,omitempty"`          // hourly, monthly, annual
+	BaseSalaryCents *int    `db:"base_salary_cents" json:"base_salary_cents,omitempty"`
+	Currency       *string  `db:"currency" json:"currency,omitempty"`
+	CreatedAt      time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt      time.Time `db:"updated_at" json:"updated_at"`
+
+	// Legacy field aliases (deprecated - use new field names)
+	SteuerID     string `db:"-" json:"-"` // Use TaxID
+	Steuerklasse string `db:"-" json:"-"` // Use TaxClass
 }
 
 // EmployeeFile represents an uploaded file
@@ -140,7 +154,10 @@ func (r *EmployeeRepository) Create(ctx context.Context, emp *Employee) error {
 		emp.ID = uuid.New().String()
 	}
 
-	// Set defaults
+	// Set defaults for required fields
+	if emp.EmploymentType == "" {
+		emp.EmploymentType = "full_time"
+	}
 	if emp.Status == "" {
 		emp.Status = "active"
 	}
@@ -150,19 +167,21 @@ func (r *EmployeeRepository) Create(ctx context.Context, emp *Employee) error {
 		query := `
 			INSERT INTO employees (
 				id, user_id, employee_number, first_name, last_name, avatar_url,
-				date_of_birth, gender, nationality, email, phone, mobile,
+				date_of_birth, gender, nationality,
 				job_title, department, employment_type, hire_date,
-				probation_end_date, termination_date, status
+				probation_end_date, termination_date, status, notes,
+				email, phone, mobile, created_by
 			) VALUES (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
 			) RETURNING created_at, updated_at
 		`
 
 		return r.db.QueryRowxContext(ctx, query,
-			emp.ID, emp.UserID, emp.Personalnummer, emp.Vorname, emp.Nachname, emp.Profilbild,
-			emp.Geburtsdatum, emp.Geschlecht, emp.Nationalitaet, emp.Email, emp.Phone, emp.Mobile,
-			emp.Rolle, emp.Abteilung, emp.Anstellungsart, emp.Eintrittsdatum,
-			emp.Probezeitende, emp.Befristungsende, emp.Status,
+			emp.ID, emp.UserID, emp.EmployeeNumber, emp.FirstName, emp.LastName, emp.AvatarURL,
+			emp.DateOfBirth, emp.Gender, emp.Nationality,
+			emp.JobTitle, emp.Department, emp.EmploymentType, emp.HireDate,
+			emp.ProbationEnd, emp.TerminationDate, emp.Status, emp.Notes,
+			emp.Email, emp.Phone, emp.Mobile, emp.CreatedBy,
 		).Scan(&emp.CreatedAt, &emp.UpdatedAt)
 	})
 }
@@ -182,9 +201,10 @@ func (r *EmployeeRepository) GetByID(ctx context.Context, id string) (*Employee,
 	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
 		query := `
 			SELECT id, user_id, employee_number, first_name, last_name, avatar_url,
-			       date_of_birth, gender, nationality, email, phone, mobile,
+			       date_of_birth, gender, nationality,
 			       job_title, department, employment_type, hire_date,
-			       probation_end_date, termination_date, status,
+			       probation_end_date, termination_date, status, notes,
+			       email, phone, mobile, created_by, updated_by,
 			       created_at, updated_at
 			FROM employees
 			WHERE id = $1 AND deleted_at IS NULL
@@ -227,9 +247,10 @@ func (r *EmployeeRepository) List(ctx context.Context, page, perPage int) ([]*Em
 		offset := (page - 1) * perPage
 		query := `
 			SELECT id, user_id, employee_number, first_name, last_name, avatar_url,
-			       date_of_birth, gender, nationality, email, phone, mobile,
+			       date_of_birth, gender, nationality,
 			       job_title, department, employment_type, hire_date,
-			       probation_end_date, termination_date, status,
+			       probation_end_date, termination_date, status, notes,
+			       email, phone, mobile, created_by, updated_by,
 			       created_at, updated_at
 			FROM employees
 			WHERE deleted_at IS NULL
@@ -261,17 +282,19 @@ func (r *EmployeeRepository) Update(ctx context.Context, emp *Employee) error {
 		query := `
 			UPDATE employees SET
 				user_id = $2, employee_number = $3, first_name = $4, last_name = $5, avatar_url = $6,
-				date_of_birth = $7, gender = $8, nationality = $9, email = $10, phone = $11, mobile = $12,
-				job_title = $13, department = $14, employment_type = $15, hire_date = $16,
-				probation_end_date = $17, termination_date = $18, status = $19
+				date_of_birth = $7, gender = $8, nationality = $9,
+				job_title = $10, department = $11, employment_type = $12, hire_date = $13,
+				probation_end_date = $14, termination_date = $15, status = $16, notes = $17,
+				email = $18, phone = $19, mobile = $20, updated_by = $21
 			WHERE id = $1 AND deleted_at IS NULL
 		`
 
 		result, err := r.db.ExecContext(ctx, query,
-			emp.ID, emp.UserID, emp.Personalnummer, emp.Vorname, emp.Nachname, emp.Profilbild,
-			emp.Geburtsdatum, emp.Geschlecht, emp.Nationalitaet, emp.Email, emp.Phone, emp.Mobile,
-			emp.Rolle, emp.Abteilung, emp.Anstellungsart, emp.Eintrittsdatum,
-			emp.Probezeitende, emp.Befristungsende, emp.Status,
+			emp.ID, emp.UserID, emp.EmployeeNumber, emp.FirstName, emp.LastName, emp.AvatarURL,
+			emp.DateOfBirth, emp.Gender, emp.Nationality,
+			emp.JobTitle, emp.Department, emp.EmploymentType, emp.HireDate,
+			emp.ProbationEnd, emp.TerminationDate, emp.Status, emp.Notes,
+			emp.Email, emp.Phone, emp.Mobile, emp.UpdatedBy,
 		)
 		if err != nil {
 			return err
@@ -357,6 +380,9 @@ func (r *EmployeeRepository) SaveAddress(ctx context.Context, addr *EmployeeAddr
 	}
 
 	// Set default values
+	if addr.Country == "" {
+		addr.Country = "Germany"
+	}
 	if addr.AddressType == "" {
 		addr.AddressType = "home"
 	}
@@ -364,23 +390,20 @@ func (r *EmployeeRepository) SaveAddress(ctx context.Context, addr *EmployeeAddr
 	// Execute query with tenant's search_path
 	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
 		query := `
-			INSERT INTO employee_addresses (id, employee_id, address_type, street, house_number,
-			       address_line2, postal_code, city, state, country, is_primary)
+			INSERT INTO employee_addresses (id, employee_id, address_type, street, house_number, address_line2, postal_code, city, state, country, is_primary)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			ON CONFLICT (id)
-			DO UPDATE SET street = $4, house_number = $5, address_line2 = $6,
-			       postal_code = $7, city = $8, state = $9, country = $10, updated_at = NOW()
+			DO UPDATE SET address_type = $3, street = $4, house_number = $5, address_line2 = $6, postal_code = $7, city = $8, state = $9, country = $10, updated_at = NOW()
 		`
 
 		_, err := r.db.ExecContext(ctx, query,
-			addr.ID, addr.EmployeeID, addr.AddressType, addr.Street, addr.HouseNumber,
-			addr.AddressLine2, addr.PostalCode, addr.City, addr.State, addr.Country, addr.IsPrimary,
+			addr.ID, addr.EmployeeID, addr.AddressType, addr.Street, addr.HouseNumber, addr.AddressLine2, addr.PostalCode, addr.City, addr.State, addr.Country, addr.IsPrimary,
 		)
 		return err
 	})
 }
 
-// GetContact gets an employee's contact info
+// GetContact gets an employee's contact (emergency contact)
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *EmployeeRepository) GetContact(ctx context.Context, employeeID string) (*EmployeeContact, error) {
 	// Extract tenant schema from context
@@ -411,7 +434,7 @@ func (r *EmployeeRepository) GetContact(ctx context.Context, employeeID string) 
 	return &contact, nil
 }
 
-// SaveContact saves an employee's contact info
+// SaveContact saves an employee's contact (emergency contact)
 // TENANT-ISOLATED: Inserts/updates only in the tenant's schema
 func (r *EmployeeRepository) SaveContact(ctx context.Context, contact *EmployeeContact) error {
 	// Extract tenant schema from context
@@ -435,7 +458,7 @@ func (r *EmployeeRepository) SaveContact(ctx context.Context, contact *EmployeeC
 			INSERT INTO employee_contacts (id, employee_id, contact_type, name, relationship, phone, email, is_primary)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 			ON CONFLICT (id)
-			DO UPDATE SET name = $4, relationship = $5, phone = $6, email = $7, updated_at = NOW()
+			DO UPDATE SET contact_type = $3, name = $4, relationship = $5, phone = $6, email = $7, updated_at = NOW()
 		`
 
 		_, err := r.db.ExecContext(ctx, query,
@@ -460,8 +483,9 @@ func (r *EmployeeRepository) GetFinancials(ctx context.Context, employeeID strin
 	// Execute query with tenant's search_path
 	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
 		query := `
-			SELECT id, employee_id, iban, bic, bank_name, account_holder, tax_id, tax_class,
-			       church_tax, child_allowance, salary_type, base_salary_cents, currency,
+			SELECT id, employee_id, iban, bic, bank_name, account_holder,
+			       tax_id, tax_class, church_tax, child_allowance,
+			       salary_type, base_salary_cents, currency,
 			       created_at, updated_at
 			FROM employee_financials WHERE employee_id = $1 LIMIT 1
 		`
@@ -491,28 +515,24 @@ func (r *EmployeeRepository) SaveFinancials(ctx context.Context, fin *EmployeeFi
 		fin.ID = uuid.New().String()
 	}
 
-	// Set default currency
-	if fin.Currency == "" {
-		fin.Currency = "EUR"
-	}
-
 	// Execute query with tenant's search_path
 	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
 		query := `
 			INSERT INTO employee_financials (
-				id, employee_id, account_holder, iban, bic, bank_name, tax_id, tax_class,
-				church_tax, child_allowance, salary_type, base_salary_cents, currency
+				id, employee_id, iban, bic, bank_name, account_holder,
+				tax_id, tax_class, church_tax, child_allowance,
+				salary_type, base_salary_cents, currency
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 			ON CONFLICT (employee_id)
 			DO UPDATE SET
-				account_holder = $3, iban = $4, bic = $5, bank_name = $6,
+				iban = $3, bic = $4, bank_name = $5, account_holder = $6,
 				tax_id = $7, tax_class = $8, church_tax = $9, child_allowance = $10,
 				salary_type = $11, base_salary_cents = $12, currency = $13, updated_at = NOW()
 		`
 
 		_, err := r.db.ExecContext(ctx, query,
-			fin.ID, fin.EmployeeID, fin.AccountHolder, fin.IBAN, fin.BIC,
-			fin.BankName, fin.TaxID, fin.TaxClass, fin.ChurchTax, fin.ChildAllowance,
+			fin.ID, fin.EmployeeID, fin.IBAN, fin.BIC, fin.BankName, fin.AccountHolder,
+			fin.TaxID, fin.TaxClass, fin.ChurchTax, fin.ChildAllowance,
 			fin.SalaryType, fin.BaseSalaryCents, fin.Currency,
 		)
 		return err

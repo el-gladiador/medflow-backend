@@ -12,7 +12,7 @@ import (
 )
 
 // InventoryBatch represents an inventory batch
-// Actual DB schema: item_id, location_id, batch_number, lot_number, initial_quantity,
+// Tenant schema: id, item_id, location_id, batch_number, lot_number, initial_quantity,
 // current_quantity, reserved_quantity, manufactured_date, expiry_date, received_date, status
 type InventoryBatch struct {
 	ID               string     `db:"id" json:"id"`
@@ -24,12 +24,13 @@ type InventoryBatch struct {
 	CurrentQuantity  int        `db:"current_quantity" json:"current_quantity"`
 	ReservedQuantity int        `db:"reserved_quantity" json:"reserved_quantity"`
 	ManufacturedDate *time.Time `db:"manufactured_date" json:"manufactured_date,omitempty"`
-	ExpiryDate       time.Time  `db:"expiry_date" json:"expiry_date"`
+	ExpiryDate       *time.Time `db:"expiry_date" json:"expiry_date,omitempty"`
 	ReceivedDate     time.Time  `db:"received_date" json:"received_date"`
 	Status           string     `db:"status" json:"status"`
 	CreatedAt        time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt        time.Time  `db:"updated_at" json:"updated_at"`
-	// Computed field for backwards compatibility
+	DeletedAt        *time.Time `db:"deleted_at" json:"-"`
+	// Computed field for API compatibility
 	Quantity int `db:"-" json:"quantity"`
 }
 
@@ -71,9 +72,9 @@ func (r *BatchRepository) Create(ctx context.Context, batch *InventoryBatch) err
 		batch.ID = uuid.New().String()
 	}
 
-	// Set default status
+	// Set defaults
 	if batch.Status == "" {
-		batch.Status = "active"
+		batch.Status = "available"
 	}
 
 	// Execute query with tenant's search_path
@@ -148,7 +149,7 @@ func (r *BatchRepository) ListByItem(ctx context.Context, itemID string) ([]*Inv
 			       current_quantity, reserved_quantity, manufactured_date, expiry_date,
 			       received_date, status, created_at, updated_at
 			FROM inventory_batches
-			WHERE item_id = $1 AND status = 'active' AND deleted_at IS NULL
+			WHERE item_id = $1 AND status = 'available' AND deleted_at IS NULL
 			ORDER BY expiry_date
 		`
 		if err := r.db.SelectContext(ctx, &batches, query, itemID); err != nil {
@@ -245,7 +246,7 @@ func (r *BatchRepository) GetTotalStock(ctx context.Context, itemID string) (int
 
 	// Execute query with tenant's search_path
 	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
-		query := `SELECT SUM(current_quantity) FROM inventory_batches WHERE item_id = $1 AND status = 'active' AND deleted_at IS NULL AND current_quantity > 0`
+		query := `SELECT SUM(current_quantity) FROM inventory_batches WHERE item_id = $1 AND status = 'available' AND deleted_at IS NULL AND current_quantity > 0`
 		return r.db.GetContext(ctx, &total, query, itemID)
 	})
 
@@ -277,7 +278,7 @@ func (r *BatchRepository) GetExpiringBatches(ctx context.Context, withinDays int
 			       current_quantity, reserved_quantity, manufactured_date, expiry_date,
 			       received_date, status, created_at, updated_at
 			FROM inventory_batches
-			WHERE status = 'active' AND deleted_at IS NULL AND current_quantity > 0
+			WHERE status = 'available' AND deleted_at IS NULL AND current_quantity > 0
 			AND expiry_date <= NOW() + INTERVAL '1 day' * $1
 			ORDER BY expiry_date
 		`
@@ -317,7 +318,7 @@ func (r *BatchRepository) GetExpiredBatches(ctx context.Context) ([]*InventoryBa
 			       current_quantity, reserved_quantity, manufactured_date, expiry_date,
 			       received_date, status, created_at, updated_at
 			FROM inventory_batches
-			WHERE status = 'active' AND deleted_at IS NULL AND current_quantity > 0 AND expiry_date < NOW()
+			WHERE status = 'available' AND deleted_at IS NULL AND current_quantity > 0 AND expiry_date < NOW()
 			ORDER BY expiry_date
 		`
 		if err := r.db.SelectContext(ctx, &batches, query); err != nil {
@@ -406,7 +407,7 @@ func (r *BatchRepository) GetAllActiveBatches(ctx context.Context) ([]*Inventory
 			SELECT id, item_id, location_id, batch_number, lot_number, initial_quantity,
 			       current_quantity, reserved_quantity, manufactured_date, expiry_date,
 			       received_date, status, created_at, updated_at
-			FROM inventory_batches WHERE status = 'active' AND deleted_at IS NULL ORDER BY expiry_date
+			FROM inventory_batches WHERE status = 'available' AND deleted_at IS NULL ORDER BY expiry_date
 		`
 		if err := r.db.SelectContext(ctx, &batches, query); err != nil {
 			return err

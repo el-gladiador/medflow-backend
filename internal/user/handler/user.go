@@ -8,6 +8,7 @@ import (
 	"github.com/medflow/medflow-backend/internal/user/service"
 	"github.com/medflow/medflow-backend/pkg/httputil"
 	"github.com/medflow/medflow-backend/pkg/logger"
+	"github.com/medflow/medflow-backend/pkg/tenant"
 )
 
 // UserHandler handles user endpoints
@@ -77,7 +78,18 @@ func (h *UserHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *UserHandler) GetUserInternal(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	user, err := h.service.GetByID(r.Context(), id)
+	// Extract tenant headers for internal calls (set by auth service)
+	// Internal endpoints don't use TenantMiddleware, so we manually add tenant context
+	tenantID := r.Header.Get("X-Tenant-ID")
+	tenantSlug := r.Header.Get("X-Tenant-Slug")
+	tenantSchema := r.Header.Get("X-Tenant-Schema")
+
+	ctx := r.Context()
+	if tenantID != "" && tenantSchema != "" {
+		ctx = tenant.WithTenantContext(ctx, tenantID, tenantSlug, tenantSchema)
+	}
+
+	user, err := h.service.GetByID(ctx, id)
 	if err != nil {
 		httputil.Error(w, err)
 		return

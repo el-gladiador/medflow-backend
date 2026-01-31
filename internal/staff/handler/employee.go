@@ -130,40 +130,31 @@ func (h *EmployeeHandler) UpdatePersonal(w http.ResponseWriter, r *http.Request)
 
 	// Decode and merge personal info
 	var req struct {
-		Vorname       string  `json:"vorname"`
-		Nachname      string  `json:"nachname"`
-		Profilbild    *string `json:"profilbild"`
-		Geburtsdatum  string  `json:"geburtsdatum"`
-		Geburtsort    *string `json:"geburtsort"`
-		Geschlecht    string  `json:"geschlecht"`
-		Nationalitaet string  `json:"nationalitaet"`
-		Familienstand *string `json:"familienstand"`
+		FirstName   string  `json:"first_name"`
+		LastName    string  `json:"last_name"`
+		AvatarURL   *string `json:"avatar_url"`
+		Gender      *string `json:"gender"`
+		Nationality *string `json:"nationality"`
 	}
 	if err := httputil.DecodeJSON(r, &req); err != nil {
 		httputil.Error(w, err)
 		return
 	}
 
-	if req.Vorname != "" {
-		emp.Vorname = req.Vorname
+	if req.FirstName != "" {
+		emp.FirstName = req.FirstName
 	}
-	if req.Nachname != "" {
-		emp.Nachname = req.Nachname
+	if req.LastName != "" {
+		emp.LastName = req.LastName
 	}
-	if req.Profilbild != nil {
-		emp.Profilbild = req.Profilbild
+	if req.AvatarURL != nil {
+		emp.AvatarURL = req.AvatarURL
 	}
-	if req.Geburtsort != nil {
-		emp.Geburtsort = req.Geburtsort
+	if req.Gender != nil {
+		emp.Gender = req.Gender
 	}
-	if req.Geschlecht != "" {
-		emp.Geschlecht = &req.Geschlecht
-	}
-	if req.Nationalitaet != "" {
-		emp.Nationalitaet = &req.Nationalitaet
-	}
-	if req.Familienstand != nil {
-		emp.Familienstand = req.Familienstand
+	if req.Nationality != nil {
+		emp.Nationality = req.Nationality
 	}
 
 	if err := h.service.Update(r.Context(), emp); err != nil {

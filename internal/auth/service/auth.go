@@ -147,13 +147,13 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*jwt.To
 		return nil, errors.Unauthorized("session revoked")
 	}
 
-	// Get user info from user service
-	user, err := s.getUserInfo(ctx, claims.UserID)
+	// Get user info from user service (pass tenant context from refresh token claims)
+	user, err := s.getUserInfo(ctx, claims.UserID, claims.TenantID, claims.TenantSlug, claims.TenantSchema)
 	if err != nil {
 		return nil, err
 	}
 
-	// Generate new tokens
+	// Generate new tokens (preserve tenant context from claims)
 	tokenInfo := &jwt.UserInfo{
 		ID:          user.ID,
 		Email:       user.Email,
@@ -161,6 +161,11 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*jwt.To
 		Role:        user.Role,
 		Permissions: user.Permissions,
 		IsManager:   user.IsManager,
+
+		// Preserve tenant context for new tokens
+		TenantID:     claims.TenantID,
+		TenantSlug:   claims.TenantSlug,
+		TenantSchema: claims.TenantSchema,
 	}
 
 	tokens, err := s.jwtManager.GenerateTokenPair(tokenInfo, session.ID)
@@ -178,8 +183,8 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*jwt.To
 }
 
 // GetCurrentUser gets the current user from token claims
-func (s *AuthService) GetCurrentUser(ctx context.Context, userID string) (*UserInfo, error) {
-	return s.getUserInfo(ctx, userID)
+func (s *AuthService) GetCurrentUser(ctx context.Context, userID, tenantID, tenantSlug, tenantSchema string) (*UserInfo, error) {
+	return s.getUserInfo(ctx, userID, tenantID, tenantSlug, tenantSchema)
 }
 
 // validateCredentials validates user credentials against user service
@@ -231,12 +236,23 @@ func (s *AuthService) validateCredentials(ctx context.Context, email, password s
 }
 
 // getUserInfo fetches user info from user service
-func (s *AuthService) getUserInfo(ctx context.Context, userID string) (*UserInfo, error) {
+func (s *AuthService) getUserInfo(ctx context.Context, userID, tenantID, tenantSlug, tenantSchema string) (*UserInfo, error) {
 	url := fmt.Sprintf("%s/api/v1/internal/users/%s", s.config.Services.UserServiceURL, userID)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, errors.Internal("failed to create request")
+	}
+
+	// Forward tenant headers to user service (required for Schema-per-Tenant isolation)
+	if tenantID != "" {
+		req.Header.Set("X-Tenant-ID", tenantID)
+	}
+	if tenantSlug != "" {
+		req.Header.Set("X-Tenant-Slug", tenantSlug)
+	}
+	if tenantSchema != "" {
+		req.Header.Set("X-Tenant-Schema", tenantSchema)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
@@ -251,6 +267,7 @@ func (s *AuthService) getUserInfo(ctx context.Context, userID string) (*UserInfo
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		s.logger.Error().Int("status", resp.StatusCode).Str("user_id", userID).Msg("user service returned error")
 		return nil, errors.Internal("failed to get user info")
 	}
 
