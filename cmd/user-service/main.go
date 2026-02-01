@@ -22,14 +22,11 @@ import (
 	"github.com/medflow/medflow-backend/pkg/messaging"
 )
 
-// Frontend URL for invitation links
-const frontendURL = "http://localhost:3000"
-
 func main() {
-	// Load configuration
-	cfg, err := config.Load("user-service")
+	// Load configuration with validation (fails fast in production if required config is missing)
+	cfg, err := config.LoadWithValidation("user-service")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "configuration error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -61,17 +58,14 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	roleRepo := repository.NewRoleRepository(db)
 	auditRepo := repository.NewAuditRepository(db)
-	inviteRepo := repository.NewInvitationRepository(db)
 
 	// Initialize services
 	userService := service.NewUserService(userRepo, roleRepo, auditRepo, publisher, log)
-	inviteService := service.NewInvitationService(inviteRepo, userRepo, roleRepo, auditRepo, publisher, log, frontendURL)
 
 	// Initialize handlers
 	userHandler := handler.NewUserHandler(userService, log)
 	roleHandler := handler.NewRoleHandler(roleRepo, log)
 	auditHandler := handler.NewAuditHandler(auditRepo, log)
-	inviteHandler := handler.NewInvitationHandler(inviteService, log)
 
 	// Create router
 	r := chi.NewRouter()
@@ -98,14 +92,6 @@ func main() {
 		r.Get("/users/{id}", userHandler.GetUserInternal)
 	})
 
-	// Public endpoints (no tenant required)
-	r.Route("/api/v1/public", func(r chi.Router) {
-		// Get invitation info by token (for acceptance page)
-		r.Get("/invitations/token/{token}", inviteHandler.GetByToken)
-		// Accept invitation (creates user)
-		r.Post("/invitations/token/{token}/accept", inviteHandler.Accept)
-	})
-
 	// Protected API endpoints (tenant required)
 	r.Route("/api/v1", func(r chi.Router) {
 		// Apply tenant middleware to all protected routes
@@ -129,15 +115,6 @@ func main() {
 		r.Route("/roles", func(r chi.Router) {
 			r.Get("/", roleHandler.List)
 			r.Get("/{id}", roleHandler.Get)
-		})
-
-		// Invitations (authenticated endpoints)
-		r.Route("/invitations", func(r chi.Router) {
-			r.Get("/", inviteHandler.List)
-			r.Post("/", inviteHandler.Create)
-			r.Get("/{id}", inviteHandler.Get)
-			r.Post("/{id}/revoke", inviteHandler.Revoke)
-			r.Post("/{id}/resend", inviteHandler.Resend)
 		})
 
 		// Audit logs

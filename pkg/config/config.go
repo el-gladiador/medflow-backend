@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -28,6 +29,9 @@ type ServerConfig struct {
 
 // DatabaseConfig holds database connection configuration
 type DatabaseConfig struct {
+	// URL is a 12-Factor style database connection URL (takes precedence if set)
+	// Format: postgres://user:password@host:port/database?sslmode=disable
+	URL             string        `mapstructure:"url"`
 	Host            string        `mapstructure:"host"`
 	Port            int           `mapstructure:"port"`
 	User            string        `mapstructure:"user"`
@@ -39,12 +43,36 @@ type DatabaseConfig struct {
 	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
 }
 
-// DSN returns the PostgreSQL connection string
+// DSN returns the PostgreSQL connection string.
+// If URL is set, it parses and uses that. Otherwise, it builds from individual fields.
 func (c *DatabaseConfig) DSN() string {
+	// If URL is provided, parse it and return as DSN
+	if c.URL != "" {
+		parsed, err := ParseDatabaseURL(c.URL)
+		if err == nil {
+			return parsed.ToDSN()
+		}
+		// Fall through to individual fields if URL parsing fails
+	}
+
 	return fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		c.Host, c.Port, c.User, c.Password, c.Database, c.SSLMode,
 	)
+}
+
+// Validate checks that the database configuration is valid for the given environment.
+// In production/staging environments, either URL or Host must be explicitly configured.
+func (c *DatabaseConfig) Validate(environment string) error {
+	if environment == EnvProduction || environment == EnvStaging {
+		if c.URL == "" && c.Host == "" {
+			return errors.New("MEDFLOW_DATABASE_URL or MEDFLOW_DATABASE_HOST required in " + environment)
+		}
+		if c.URL == "" && c.Host == "localhost" {
+			return errors.New("localhost database not allowed in " + environment + " - set MEDFLOW_DATABASE_URL or MEDFLOW_DATABASE_HOST")
+		}
+	}
+	return nil
 }
 
 // RabbitMQConfig holds RabbitMQ connection configuration
@@ -71,12 +99,59 @@ type ServicesConfig struct {
 	InventoryServiceURL string `mapstructure:"inventory_service_url"`
 }
 
-// Load loads configuration from environment and config files
+// Load loads configuration from environment and config files.
+// This function applies development defaults and is suitable for local development.
+// For production use, prefer LoadWithValidation which enforces required configuration.
 func Load(serviceName string) (*Config, error) {
+	return loadConfig(serviceName, true)
+}
+
+// LoadWithValidation loads configuration and validates it for the current environment.
+// In production/staging environments, this will fail if required configuration is missing.
+// Use this function in service main() for fail-fast behavior.
+func LoadWithValidation(serviceName string) (*Config, error) {
+	cfg, err := loadConfig(serviceName, true)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate database configuration for the environment
+	if err := cfg.Database.Validate(cfg.Server.Environment); err != nil {
+		return nil, fmt.Errorf("database configuration error: %w", err)
+	}
+
+	// Validate JWT secret in production
+	if cfg.Server.Environment == EnvProduction || cfg.Server.Environment == EnvStaging {
+		if cfg.JWT.Secret == "" || cfg.JWT.Secret == "dev-secret-change-in-production" {
+			return nil, errors.New("MEDFLOW_JWT_SECRET must be set to a secure value in " + cfg.Server.Environment)
+		}
+	}
+
+	// Validate RabbitMQ URL in production
+	if cfg.Server.Environment == EnvProduction || cfg.Server.Environment == EnvStaging {
+		if cfg.RabbitMQ.URL == "" || strings.Contains(cfg.RabbitMQ.URL, "localhost") {
+			return nil, errors.New("MEDFLOW_RABBITMQ_URL must be set to a non-localhost value in " + cfg.Server.Environment)
+		}
+	}
+
+	return cfg, nil
+}
+
+// LoadDevelopment loads configuration optimized for local development.
+// This always applies development defaults regardless of environment variable.
+// Useful for test fixtures and local tooling.
+func LoadDevelopment(serviceName string) (*Config, error) {
+	return loadConfig(serviceName, true)
+}
+
+// loadConfig is the internal configuration loader
+func loadConfig(serviceName string, applyDefaults bool) (*Config, error) {
 	v := viper.New()
 
-	// Set defaults
-	setDefaults(v, serviceName)
+	// Set defaults if requested
+	if applyDefaults {
+		setDefaults(v, serviceName)
+	}
 
 	// Read from environment variables
 	v.SetEnvPrefix("MEDFLOW")
@@ -100,6 +175,32 @@ func Load(serviceName string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
+	// If DATABASE_URL is set, populate individual fields from it for compatibility
+	if cfg.Database.URL != "" {
+		parsed, err := ParseDatabaseURL(cfg.Database.URL)
+		if err == nil {
+			// Only override if the field wasn't explicitly set
+			if cfg.Database.Host == "localhost" || cfg.Database.Host == "" {
+				cfg.Database.Host = parsed.Host
+			}
+			if cfg.Database.Port == 0 || cfg.Database.Port == getDefaultDBPort(serviceName) {
+				cfg.Database.Port = parsed.Port
+			}
+			if cfg.Database.User == "medflow" || cfg.Database.User == "" {
+				cfg.Database.User = parsed.User
+			}
+			if cfg.Database.Password == "devpassword" || cfg.Database.Password == "" {
+				cfg.Database.Password = parsed.Password
+			}
+			if cfg.Database.Database == "" || cfg.Database.Database == getDefaultDBName(serviceName) {
+				cfg.Database.Database = parsed.Database
+			}
+			if cfg.Database.SSLMode == "disable" || cfg.Database.SSLMode == "" {
+				cfg.Database.SSLMode = parsed.SSLMode
+			}
+		}
+	}
+
 	return &cfg, nil
 }
 
@@ -113,6 +214,9 @@ func setDefaults(v *viper.Viper, serviceName string) {
 	v.SetDefault("server.environment", "development")
 
 	// Database defaults
+	// Note: URL is intentionally not defaulted - it takes precedence when set
+	// In development, individual fields are used; in production, URL is preferred
+	v.SetDefault("database.url", "")
 	v.SetDefault("database.host", "localhost")
 	v.SetDefault("database.port", getDefaultDBPort(serviceName))
 	v.SetDefault("database.user", "medflow")

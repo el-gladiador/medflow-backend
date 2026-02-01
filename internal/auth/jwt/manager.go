@@ -14,7 +14,8 @@ type Claims struct {
 	jwt.RegisteredClaims
 	UserID      string   `json:"user_id"`
 	Email       string   `json:"email"`
-	Name        string   `json:"name"`
+	FirstName   string   `json:"first_name"`
+	LastName    string   `json:"last_name"`
 	Role        string   `json:"role"`
 	Permissions []string `json:"permissions,omitempty"`
 	IsManager   bool     `json:"is_manager"`
@@ -23,6 +24,11 @@ type Claims struct {
 	TenantID     string `json:"tenant_id"`
 	TenantSlug   string `json:"tenant_slug"`
 	TenantSchema string `json:"tenant_schema"`
+}
+
+// FullName returns the user's full name
+func (c *Claims) FullName() string {
+	return c.FirstName + " " + c.LastName
 }
 
 // RefreshClaims represents refresh token claims
@@ -51,7 +57,8 @@ func NewManager(cfg *config.JWTConfig) *Manager {
 type UserInfo struct {
 	ID          string
 	Email       string
-	Name        string
+	FirstName   string
+	LastName    string
 	Role        string
 	Permissions []string
 	IsManager   bool
@@ -60,6 +67,11 @@ type UserInfo struct {
 	TenantID     string
 	TenantSlug   string
 	TenantSchema string
+}
+
+// FullName returns the user's full name
+func (u *UserInfo) FullName() string {
+	return u.FirstName + " " + u.LastName
 }
 
 // TokenPair contains access and refresh tokens
@@ -88,7 +100,8 @@ func (m *Manager) GenerateTokenPair(user *UserInfo, sessionID string) (*TokenPai
 		},
 		UserID:      user.ID,
 		Email:       user.Email,
-		Name:        user.Name,
+		FirstName:   user.FirstName,
+		LastName:    user.LastName,
 		Role:        user.Role,
 		Permissions: user.Permissions,
 		IsManager:   user.IsManager,

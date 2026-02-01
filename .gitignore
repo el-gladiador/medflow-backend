@@ -22,11 +22,15 @@ vendor/
 *.swo
 *~
 
-# Environment files
+# Environment files (actual config - NEVER commit credentials)
 .env
 .env.local
 .env.*.local
 deployments/.env
+deployments/.env.local
+deployments/.env.staging
+deployments/.env.production
+# Keep .env.example, .env.docker, and *.example files tracked
 
 # Build output
 dist/

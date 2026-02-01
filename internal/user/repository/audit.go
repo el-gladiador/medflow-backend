@@ -37,11 +37,22 @@ func (r *AuditRepository) Create(ctx context.Context, log *domain.AuditLog) erro
 		detailsJSON = []byte("{}")
 	}
 
+	oldValuesJSON, err := json.Marshal(log.OldValues)
+	if err != nil {
+		oldValuesJSON = nil
+	}
+
+	newValuesJSON, err := json.Marshal(log.NewValues)
+	if err != nil {
+		newValuesJSON = nil
+	}
+
 	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
 		query := `
-			INSERT INTO audit_logs (id, actor_id, actor_name, action, target_user_id, target_user_name,
-			                        resource_type, resource_id, details, ip_address, user_agent)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			INSERT INTO audit_logs (id, actor_id, actor_name, action, resource_type, resource_id,
+			                        target_user_id, target_user_name, old_values, new_values,
+			                        details, ip_address, user_agent)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 			RETURNING created_at
 		`
 
@@ -50,10 +61,12 @@ func (r *AuditRepository) Create(ctx context.Context, log *domain.AuditLog) erro
 			log.ActorID,
 			log.ActorName,
 			log.Action,
-			log.TargetUserID,
-			log.TargetUserName,
 			log.ResourceType,
 			log.ResourceID,
+			log.TargetUserID,
+			log.TargetUserName,
+			oldValuesJSON,
+			newValuesJSON,
 			detailsJSON,
 			log.IPAddress,
 			log.UserAgent,
@@ -87,8 +100,9 @@ func (r *AuditRepository) List(ctx context.Context, filter *ListFilter, page, pe
 
 		countQuery := `SELECT COUNT(*) FROM audit_logs WHERE 1=1`
 		query := `
-			SELECT id, actor_id, actor_name, action, target_user_id, target_user_name,
-			       resource_type, resource_id, details, ip_address, user_agent, created_at
+			SELECT id, actor_id, actor_name, action, resource_type, resource_id,
+			       target_user_id, target_user_name, old_values, new_values,
+			       details, ip_address, user_agent, created_at
 			FROM audit_logs
 			WHERE 1=1
 		`
@@ -132,16 +146,24 @@ func (r *AuditRepository) List(ctx context.Context, filter *ListFilter, page, pe
 
 		for rows.Next() {
 			var log domain.AuditLog
-			var detailsJSON []byte
+			var oldValuesJSON, newValuesJSON, detailsJSON []byte
 
 			if err := rows.Scan(
 				&log.ID, &log.ActorID, &log.ActorName, &log.Action,
-				&log.TargetUserID, &log.TargetUserName, &log.ResourceType,
-				&log.ResourceID, &detailsJSON, &log.IPAddress, &log.UserAgent, &log.CreatedAt,
+				&log.ResourceType, &log.ResourceID,
+				&log.TargetUserID, &log.TargetUserName,
+				&oldValuesJSON, &newValuesJSON,
+				&detailsJSON, &log.IPAddress, &log.UserAgent, &log.CreatedAt,
 			); err != nil {
 				return err
 			}
 
+			if len(oldValuesJSON) > 0 {
+				json.Unmarshal(oldValuesJSON, &log.OldValues)
+			}
+			if len(newValuesJSON) > 0 {
+				json.Unmarshal(newValuesJSON, &log.NewValues)
+			}
 			if len(detailsJSON) > 0 {
 				json.Unmarshal(detailsJSON, &log.Details)
 			}

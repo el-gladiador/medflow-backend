@@ -1,4 +1,0 @@
--- PostgreSQL doesn't support removing enum values directly
--- This would require recreating the enum type which is complex
--- For now, this migration is not reversible
--- The values will remain in the enum but won't affect functionality

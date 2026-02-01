@@ -32,24 +32,23 @@ func (r *RoleRepository) GetByID(ctx context.Context, id string) (*domain.Role, 
 
 	var role domain.Role
 	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
-		// Actual schema: id, name, display_name, description, is_system, is_default, permissions (JSONB)
 		query := `
-			SELECT id, name, display_name, description, permissions, created_at, updated_at
+			SELECT id, name, display_name, COALESCE(display_name_de, display_name) as display_name_de,
+			       description, is_system, is_default, is_manager, can_receive_delegation, level,
+			       permissions, created_at, updated_at
 			FROM roles
 			WHERE id = $1 AND deleted_at IS NULL
 		`
 
 		var permissions []byte
 		if err := r.db.QueryRowContext(ctx, query, id).Scan(
-			&role.ID, &role.Name, &role.DisplayName, &role.Description,
+			&role.ID, &role.Name, &role.DisplayName, &role.DisplayNameDE,
+			&role.Description, &role.IsSystem, &role.IsDefault, &role.IsManager,
+			&role.CanReceiveDelegation, &role.Level,
 			&permissions, &role.CreatedAt, &role.UpdatedAt,
 		); err != nil {
 			return err
 		}
-
-		// Set computed fields
-		role.IsManager = (role.Name == "admin" || role.Name == "manager")
-		role.DisplayNameDE = role.DisplayName // Use same for now
 
 		// Parse permissions from JSONB array
 		if permissions != nil {
@@ -57,6 +56,8 @@ func (r *RoleRepository) GetByID(ctx context.Context, id string) (*domain.Role, 
 			if err := json.Unmarshal(permissions, &permNames); err != nil {
 				return fmt.Errorf("failed to parse permissions: %w", err)
 			}
+			role.PermissionStrings = permNames
+			// Also populate legacy Permissions for backwards compatibility
 			for _, permName := range permNames {
 				role.Permissions = append(role.Permissions, domain.Permission{
 					Name: permName,
@@ -87,24 +88,23 @@ func (r *RoleRepository) GetByName(ctx context.Context, name string) (*domain.Ro
 
 	var role domain.Role
 	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
-		// Actual schema: id, name, display_name, description, is_system, is_default, permissions (JSONB)
 		query := `
-			SELECT id, name, display_name, description, permissions, created_at, updated_at
+			SELECT id, name, display_name, COALESCE(display_name_de, display_name) as display_name_de,
+			       description, is_system, is_default, is_manager, can_receive_delegation, level,
+			       permissions, created_at, updated_at
 			FROM roles
 			WHERE name = $1 AND deleted_at IS NULL
 		`
 
 		var permissions []byte
 		if err := r.db.QueryRowContext(ctx, query, name).Scan(
-			&role.ID, &role.Name, &role.DisplayName, &role.Description,
+			&role.ID, &role.Name, &role.DisplayName, &role.DisplayNameDE,
+			&role.Description, &role.IsSystem, &role.IsDefault, &role.IsManager,
+			&role.CanReceiveDelegation, &role.Level,
 			&permissions, &role.CreatedAt, &role.UpdatedAt,
 		); err != nil {
 			return err
 		}
-
-		// Set computed fields
-		role.IsManager = (role.Name == "admin" || role.Name == "manager")
-		role.DisplayNameDE = role.DisplayName
 
 		// Parse permissions from JSONB array
 		if permissions != nil {
@@ -112,6 +112,8 @@ func (r *RoleRepository) GetByName(ctx context.Context, name string) (*domain.Ro
 			if err := json.Unmarshal(permissions, &permNames); err != nil {
 				return fmt.Errorf("failed to parse permissions: %w", err)
 			}
+			role.PermissionStrings = permNames
+			// Also populate legacy Permissions for backwards compatibility
 			for _, permName := range permNames {
 				role.Permissions = append(role.Permissions, domain.Permission{
 					Name: permName,
@@ -142,12 +144,13 @@ func (r *RoleRepository) List(ctx context.Context) ([]*domain.Role, error) {
 
 	var roles []*domain.Role
 	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
-		// Actual schema: id, name, display_name, description, is_system, is_default, permissions (JSONB)
 		query := `
-			SELECT id, name, display_name, description, permissions, created_at, updated_at
+			SELECT id, name, display_name, COALESCE(display_name_de, display_name) as display_name_de,
+			       description, is_system, is_default, is_manager, can_receive_delegation, level,
+			       permissions, created_at, updated_at
 			FROM roles
 			WHERE deleted_at IS NULL
-			ORDER BY name
+			ORDER BY level DESC, name
 		`
 
 		rows, err := r.db.QueryxContext(ctx, query)
@@ -160,20 +163,19 @@ func (r *RoleRepository) List(ctx context.Context) ([]*domain.Role, error) {
 			var role domain.Role
 			var permissions []byte
 			if err := rows.Scan(
-				&role.ID, &role.Name, &role.DisplayName, &role.Description,
+				&role.ID, &role.Name, &role.DisplayName, &role.DisplayNameDE,
+				&role.Description, &role.IsSystem, &role.IsDefault, &role.IsManager,
+				&role.CanReceiveDelegation, &role.Level,
 				&permissions, &role.CreatedAt, &role.UpdatedAt,
 			); err != nil {
 				return err
 			}
 
-			// Set computed fields
-			role.IsManager = (role.Name == "admin" || role.Name == "manager")
-			role.DisplayNameDE = role.DisplayName
-
 			// Parse permissions from JSONB array
 			if permissions != nil {
 				var permNames []string
 				if err := json.Unmarshal(permissions, &permNames); err == nil {
+					role.PermissionStrings = permNames
 					for _, permName := range permNames {
 						role.Permissions = append(role.Permissions, domain.Permission{
 							Name: permName,

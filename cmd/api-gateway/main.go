@@ -20,10 +20,10 @@ import (
 )
 
 func main() {
-	// Load configuration
-	cfg, err := config.Load("api-gateway")
+	// Load configuration with validation (fails fast in production if required config is missing)
+	cfg, err := config.LoadWithValidation("api-gateway")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "configuration error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -80,12 +80,6 @@ func main() {
 			})
 		})
 
-		// Public invitation routes (no auth required)
-		r.Route("/public/invitations", func(r chi.Router) {
-			r.Get("/token/{token}", proxy.ForwardToUsersPublic)
-			r.Post("/token/{token}/accept", proxy.ForwardToUsersPublic)
-		})
-
 		// Protected routes
 		r.Group(func(r chi.Router) {
 			r.Use(proxy.AuthMiddleware)
@@ -109,15 +103,6 @@ func main() {
 			r.Route("/roles", func(r chi.Router) {
 				r.Get("/", proxy.ForwardToUsers)
 				r.Get("/{id}", proxy.ForwardToUsers)
-			})
-
-			// Invitations routes (authenticated)
-			r.Route("/invitations", func(r chi.Router) {
-				r.Get("/", proxy.ForwardToUsers)
-				r.Post("/", proxy.ForwardToUsers)
-				r.Get("/{id}", proxy.ForwardToUsers)
-				r.Post("/{id}/revoke", proxy.ForwardToUsers)
-				r.Post("/{id}/resend", proxy.ForwardToUsers)
 			})
 
 			// Audit routes

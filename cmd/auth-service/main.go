@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/medflow/medflow-backend/internal/auth/consumers"
 	"github.com/medflow/medflow-backend/internal/auth/handler"
 	"github.com/medflow/medflow-backend/internal/auth/jwt"
 	"github.com/medflow/medflow-backend/internal/auth/repository"
@@ -23,10 +24,10 @@ import (
 )
 
 func main() {
-	// Load configuration
-	cfg, err := config.Load("auth-service")
+	// Load configuration with validation (fails fast in production if required config is missing)
+	cfg, err := config.LoadWithValidation("auth-service")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "configuration error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -48,11 +49,29 @@ func main() {
 	}
 	defer rmq.Close()
 
-	// Initialize components
+	// Initialize repositories
 	jwtManager := jwt.NewManager(&cfg.JWT)
-	repo := repository.NewSessionRepository(db)
-	authService := service.NewAuthService(repo, jwtManager, cfg, log)
+	sessionRepo := repository.NewSessionRepository(db)
+	lookupRepo := repository.NewUserTenantLookupRepository(db)
+
+	// Initialize service
+	authService := service.NewAuthService(sessionRepo, lookupRepo, jwtManager, cfg, log)
 	authHandler := handler.NewAuthHandler(authService, log)
+
+	// Initialize and start user event consumer for lookup table sync
+	userConsumer, err := consumers.NewUserEventConsumer(rmq, lookupRepo, log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create user event consumer")
+	}
+
+	// Create cancellable context for consumer
+	consumerCtx, consumerCancel := context.WithCancel(context.Background())
+	defer consumerCancel()
+
+	if err := userConsumer.Start(consumerCtx); err != nil {
+		log.Fatal().Err(err).Msg("failed to start user event consumer")
+	}
+	log.Info().Msg("user event consumer started for lookup table sync")
 
 	// Create router
 	r := chi.NewRouter()

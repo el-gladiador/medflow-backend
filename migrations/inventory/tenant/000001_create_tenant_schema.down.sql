@@ -6,6 +6,7 @@ DROP TRIGGER IF EXISTS storage_shelves_updated_at ON storage_shelves;
 DROP TRIGGER IF EXISTS inventory_items_updated_at ON inventory_items;
 DROP TRIGGER IF EXISTS inventory_batches_updated_at ON inventory_batches;
 
+DROP TABLE IF EXISTS user_cache;
 DROP TABLE IF EXISTS inventory_alerts;
 DROP TABLE IF EXISTS stock_adjustments;
 DROP TABLE IF EXISTS inventory_batches;

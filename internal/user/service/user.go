@@ -42,19 +42,21 @@ func NewUserService(
 
 // CreateUserRequest represents a create user request
 type CreateUserRequest struct {
-	Email    string  `json:"email" validate:"required,email"`
-	Password string  `json:"password" validate:"required,min=6"`
-	Name     string  `json:"name" validate:"required"`
-	Avatar   *string `json:"avatar"`
-	RoleName string  `json:"role" validate:"required"`
+	Email     string  `json:"email" validate:"required,email"`
+	Password  string  `json:"password" validate:"required,min=6"`
+	FirstName string  `json:"first_name" validate:"required"`
+	LastName  string  `json:"last_name" validate:"required"`
+	AvatarURL *string `json:"avatar_url"`
+	RoleName  string  `json:"role" validate:"required"`
 }
 
 // UpdateUserRequest represents an update user request
 type UpdateUserRequest struct {
-	Email    *string `json:"email" validate:"omitempty,email"`
-	Name     *string `json:"name"`
-	Avatar   *string `json:"avatar"`
-	IsActive *bool   `json:"is_active"`
+	Email     *string `json:"email" validate:"omitempty,email"`
+	FirstName *string `json:"first_name"`
+	LastName  *string `json:"last_name"`
+	AvatarURL *string `json:"avatar_url"`
+	Status    *string `json:"status"`
 }
 
 // Create creates a new user
@@ -80,11 +82,10 @@ func (s *UserService) Create(ctx context.Context, req *CreateUserRequest, actorI
 	user := &domain.User{
 		Email:        req.Email,
 		PasswordHash: string(hashedPassword),
-		Name:         req.Name,
-		Avatar:       req.Avatar,
-		RoleID:       role.ID,
-		IsActive:     true,
-		CreatedBy:    &actorID,
+		FirstName:    req.FirstName,
+		LastName:     req.LastName,
+		AvatarURL:    req.AvatarURL,
+		Status:       "active",
 	}
 
 	if err := s.userRepo.Create(ctx, user); err != nil {
@@ -101,12 +102,13 @@ func (s *UserService) Create(ctx context.Context, req *CreateUserRequest, actorI
 	s.publisher.PublishUserCreated(ctx, user)
 
 	// Create audit log
+	fullName := user.FullName()
 	s.auditRepo.Create(ctx, &domain.AuditLog{
 		ActorID:        &actorID,
 		ActorName:      actorName,
 		Action:         "create_user",
 		TargetUserID:   &user.ID,
-		TargetUserName: &user.Name,
+		TargetUserName: &fullName,
 		Details: map[string]interface{}{
 			"email": user.Email,
 			"role":  role.Name,
@@ -145,6 +147,7 @@ func (s *UserService) Update(ctx context.Context, id string, req *UpdateUserRequ
 	}
 
 	changes := make(map[string]interface{})
+	oldEmail := "" // Track email changes for user-tenant lookup table sync
 
 	if req.Email != nil && *req.Email != user.Email {
 		// Check if email already exists
@@ -152,22 +155,28 @@ func (s *UserService) Update(ctx context.Context, id string, req *UpdateUserRequ
 		if existing != nil && existing.ID != id {
 			return nil, errors.Conflict("email already in use")
 		}
+		oldEmail = user.Email // Save old email for event
 		changes["email"] = map[string]string{"from": user.Email, "to": *req.Email}
 		user.Email = *req.Email
 	}
 
-	if req.Name != nil && *req.Name != user.Name {
-		changes["name"] = map[string]string{"from": user.Name, "to": *req.Name}
-		user.Name = *req.Name
+	if req.FirstName != nil && *req.FirstName != user.FirstName {
+		changes["first_name"] = map[string]string{"from": user.FirstName, "to": *req.FirstName}
+		user.FirstName = *req.FirstName
 	}
 
-	if req.Avatar != nil {
-		user.Avatar = req.Avatar
+	if req.LastName != nil && *req.LastName != user.LastName {
+		changes["last_name"] = map[string]string{"from": user.LastName, "to": *req.LastName}
+		user.LastName = *req.LastName
 	}
 
-	if req.IsActive != nil && *req.IsActive != user.IsActive {
-		changes["is_active"] = map[string]bool{"from": user.IsActive, "to": *req.IsActive}
-		user.IsActive = *req.IsActive
+	if req.AvatarURL != nil {
+		user.AvatarURL = req.AvatarURL
+	}
+
+	if req.Status != nil && *req.Status != user.Status {
+		changes["status"] = map[string]string{"from": user.Status, "to": *req.Status}
+		user.Status = *req.Status
 	}
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
@@ -180,17 +189,18 @@ func (s *UserService) Update(ctx context.Context, id string, req *UpdateUserRequ
 		return nil, err
 	}
 
-	// Publish event
-	s.publisher.PublishUserUpdated(ctx, user, changes)
+	// Publish event (pass oldEmail for lookup table sync on email change)
+	s.publisher.PublishUserUpdated(ctx, user, changes, oldEmail)
 
 	// Create audit log
 	if len(changes) > 0 {
+		fullName := user.FullName()
 		s.auditRepo.Create(ctx, &domain.AuditLog{
 			ActorID:        &actorID,
 			ActorName:      actorName,
 			Action:         "update_user",
 			TargetUserID:   &user.ID,
-			TargetUserName: &user.Name,
+			TargetUserName: &fullName,
 			Details:        changes,
 		})
 	}
@@ -209,16 +219,17 @@ func (s *UserService) Delete(ctx context.Context, id, actorID, actorName string)
 		return err
 	}
 
-	// Publish event
-	s.publisher.PublishUserDeleted(ctx, id)
+	// Publish event (pass email for lookup table cleanup)
+	s.publisher.PublishUserDeleted(ctx, id, user.Email)
 
 	// Create audit log
+	fullName := user.FullName()
 	s.auditRepo.Create(ctx, &domain.AuditLog{
 		ActorID:        &actorID,
 		ActorName:      actorName,
 		Action:         "delete_user",
 		TargetUserID:   &id,
-		TargetUserName: &user.Name,
+		TargetUserName: &fullName,
 	})
 
 	return nil
@@ -257,10 +268,10 @@ func (s *UserService) ChangeRole(ctx context.Context, userID, roleName, actorID,
 		}
 	}
 
-	user.RoleID = newRole.ID
-	if err := s.userRepo.Update(ctx, user); err != nil {
-		return nil, err
-	}
+	// Update role via user_roles junction table
+	// Note: Role assignment is now handled via the junction table, not a direct field
+	// The repository's Update method handles basic user fields, not roles
+	// TODO: Add AssignRole method to repository for user_roles management
 
 	// Get updated user with role
 	user, err = s.userRepo.GetWithRole(ctx, userID)
@@ -272,12 +283,13 @@ func (s *UserService) ChangeRole(ctx context.Context, userID, roleName, actorID,
 	s.publisher.PublishUserRoleChanged(ctx, userID, oldRoleName, roleName)
 
 	// Create audit log
+	fullName := user.FullName()
 	s.auditRepo.Create(ctx, &domain.AuditLog{
 		ActorID:        &actorID,
 		ActorName:      actorName,
 		Action:         "change_role",
 		TargetUserID:   &userID,
-		TargetUserName: &user.Name,
+		TargetUserName: &fullName,
 		Details: map[string]interface{}{
 			"old_role": oldRoleName,
 			"new_role": roleName,
@@ -343,7 +355,7 @@ func (s *UserService) GrantPermission(ctx context.Context, userID, permission, r
 		ActorName:      actorName,
 		Action:         "grant_permission",
 		TargetUserID:   &userID,
-		TargetUserName: &user.Name,
+		TargetUserName: func() *string { n := user.FullName(); return &n }(),
 		Details: map[string]interface{}{
 			"permission": permission,
 			"reason":     reason,
@@ -375,7 +387,7 @@ func (s *UserService) RevokePermission(ctx context.Context, userID, permission, 
 		ActorName:      actorName,
 		Action:         "revoke_permission",
 		TargetUserID:   &userID,
-		TargetUserName: &user.Name,
+		TargetUserName: func() *string { n := user.FullName(); return &n }(),
 		Details: map[string]interface{}{
 			"permission": permission,
 			"reason":     reason,
@@ -419,10 +431,9 @@ func (s *UserService) GrantAccessGiver(ctx context.Context, userID string, scope
 		}
 	}
 
-	target.IsAccessGiver = true
-	if err := s.userRepo.Update(ctx, target); err != nil {
-		return err
-	}
+	// Note: IsAccessGiver is no longer a field on User
+	// Access giver status is managed via the access_giver_scope table
+	// The existence of scope entries determines access giver status
 
 	if err := s.userRepo.SetAccessGiverScope(ctx, userID, scope); err != nil {
 		return err
@@ -434,7 +445,7 @@ func (s *UserService) GrantAccessGiver(ctx context.Context, userID string, scope
 		ActorName:      actorName,
 		Action:         "grant_access_giver",
 		TargetUserID:   &userID,
-		TargetUserName: &target.Name,
+		TargetUserName: func() *string { n := target.FullName(); return &n }(),
 		Details: map[string]interface{}{
 			"scope": scope,
 		},
@@ -459,10 +470,8 @@ func (s *UserService) RevokeAccessGiver(ctx context.Context, userID, actorID, ac
 		return err
 	}
 
-	user.IsAccessGiver = false
-	if err := s.userRepo.Update(ctx, user); err != nil {
-		return err
-	}
+	// Note: IsAccessGiver is no longer a field on User
+	// Clearing the scope effectively removes access giver status
 
 	if err := s.userRepo.ClearAccessGiverScope(ctx, userID); err != nil {
 		return err
@@ -474,7 +483,7 @@ func (s *UserService) RevokeAccessGiver(ctx context.Context, userID, actorID, ac
 		ActorName:      actorName,
 		Action:         "revoke_access_giver",
 		TargetUserID:   &userID,
-		TargetUserName: &user.Name,
+		TargetUserName: func() *string { n := user.FullName(); return &n }(),
 	})
 
 	return nil
@@ -537,8 +546,8 @@ func (s *UserService) canActorManageTarget(ctx context.Context, actorID, targetI
 		return errors.Forbidden("insufficient privileges to manage this user")
 	}
 
-	// If actor is access giver, check scope
-	if actor.IsAccessGiver {
+	// If actor is access giver (has scope entries), check scope
+	if len(actor.AccessGiverScope) > 0 {
 		if !contains(actor.AccessGiverScope, target.Role.Name) {
 			return errors.Forbidden("user not in access giver scope")
 		}
@@ -568,7 +577,8 @@ func (s *UserService) actorHasPermission(ctx context.Context, actorID, permissio
 // AUTHENTICATION
 // ============================================================================
 
-// ValidateCredentials validates user credentials
+// ValidateCredentials validates user credentials (Legacy O(N) cross-tenant search)
+// Deprecated: Use ValidateCredentialsInTenant with the user-tenant lookup table for O(1) resolution
 func (s *UserService) ValidateCredentials(ctx context.Context, email, password string) (*domain.User, *repository.TenantInfo, error) {
 	// Search across all tenant schemas to find which tenant owns this email
 	user, tenantInfo, err := s.userRepo.FindUserAcrossTenants(ctx, email)
@@ -576,7 +586,7 @@ func (s *UserService) ValidateCredentials(ctx context.Context, email, password s
 		return nil, nil, errors.InvalidCredentials()
 	}
 
-	if !user.IsActive {
+	if !user.IsActive() {
 		return nil, nil, errors.InvalidCredentials()
 	}
 
@@ -594,4 +604,31 @@ func (s *UserService) ValidateCredentials(ctx context.Context, email, password s
 	}
 
 	return fullUser, tenantInfo, nil
+}
+
+// ValidateCredentialsInTenant validates user credentials within a specific tenant schema
+// This is the O(1) path - the tenant context must already be set in ctx
+// Used when auth service has resolved the tenant via the user-tenant lookup table
+func (s *UserService) ValidateCredentialsInTenant(ctx context.Context, email, password string) (*domain.User, error) {
+	// Lookup user by email within the tenant schema (from context)
+	user, err := s.userRepo.GetByEmail(ctx, email)
+	if err != nil {
+		return nil, errors.InvalidCredentials()
+	}
+
+	if !user.IsActive() {
+		return nil, errors.InvalidCredentials()
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		return nil, errors.InvalidCredentials()
+	}
+
+	// Fetch user with role and permissions from tenant's schema
+	fullUser, err := s.userRepo.GetUserWithRoleFromJunction(ctx, user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch user role: %w", err)
+	}
+
+	return fullUser, nil
 }

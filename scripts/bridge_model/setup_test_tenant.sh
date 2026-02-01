@@ -21,6 +21,10 @@ echo "3. Creating dev user in user service..."
 docker exec -i medflow-db-users psql -U medflow -d medflow_users < scripts/bridge_model/create_dev_user.sql
 
 echo ""
+echo "4. Seeding user-tenant lookup..."
+docker exec -i medflow-db-auth psql -U medflow -d medflow_auth < scripts/bridge_model/seed_tenant1_lookup.sql
+
+echo ""
 echo "========================================="
 echo "Test Tenant Setup Complete!"
 echo "========================================="

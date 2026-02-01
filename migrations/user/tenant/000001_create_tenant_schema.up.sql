@@ -62,18 +62,27 @@ CREATE TABLE sessions (
 );
 
 -- Roles table (custom roles per tenant)
+-- Uses JSONB array for permissions - simpler and more flexible than separate permission tables
 CREATE TABLE roles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
+    -- Identity
     name VARCHAR(100) NOT NULL UNIQUE,
     display_name VARCHAR(255) NOT NULL,
+    display_name_de VARCHAR(255),  -- German display name
     description TEXT,
 
-    -- Role type
-    is_system BOOLEAN NOT NULL DEFAULT FALSE,  -- System roles can't be deleted
-    is_default BOOLEAN NOT NULL DEFAULT FALSE, -- Assigned to new users
+    -- Role type flags
+    is_system BOOLEAN NOT NULL DEFAULT FALSE,       -- System roles can't be deleted
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,      -- Assigned to new users
+    is_manager BOOLEAN NOT NULL DEFAULT FALSE,      -- Can manage other users
+    can_receive_delegation BOOLEAN NOT NULL DEFAULT FALSE,  -- Can receive delegated permissions
 
-    -- Permissions (JSON array)
+    -- Role hierarchy level (higher = more privileges)
+    level INTEGER NOT NULL DEFAULT 10,
+
+    -- Permissions as JSONB array of strings
+    -- Supports wildcards: "*" (all), "staff.*" (all staff), "inventory.read" (specific)
     permissions JSONB NOT NULL DEFAULT '[]'::jsonb,
 
     -- Timestamps
@@ -95,25 +104,8 @@ CREATE TABLE user_roles (
     CONSTRAINT user_roles_unique UNIQUE (user_id, role_id)
 );
 
--- Audit log (tenant-specific)
-CREATE TABLE audit_log (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id),
-
-    -- Action details
-    action VARCHAR(100) NOT NULL,
-    entity_type VARCHAR(100),
-    entity_id UUID,
-    old_values JSONB,
-    new_values JSONB,
-
-    -- Context
-    ip_address INET,
-    user_agent TEXT,
-
-    -- Timestamp
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+-- Note: audit_logs table is created in 000003_create_audit_logs.up.sql
+-- This avoids duplication and ensures a single canonical audit table
 
 -- Indexes
 CREATE INDEX idx_users_email ON users(email) WHERE deleted_at IS NULL;
@@ -129,10 +121,7 @@ CREATE INDEX idx_roles_name ON roles(name) WHERE deleted_at IS NULL;
 CREATE INDEX idx_user_roles_user ON user_roles(user_id);
 CREATE INDEX idx_user_roles_role ON user_roles(role_id);
 
-CREATE INDEX idx_audit_log_user ON audit_log(user_id);
-CREATE INDEX idx_audit_log_entity ON audit_log(entity_type, entity_id);
-CREATE INDEX idx_audit_log_action ON audit_log(action);
-CREATE INDEX idx_audit_log_time ON audit_log(created_at DESC);
+-- Note: audit_logs indexes are created in 000003_create_audit_logs.up.sql
 
 -- Triggers
 CREATE TRIGGER users_updated_at
@@ -143,10 +132,10 @@ CREATE TRIGGER roles_updated_at
     BEFORE UPDATE ON roles
     FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
 
--- Insert default roles
-INSERT INTO roles (id, name, display_name, description, is_system, is_default, permissions) VALUES
-    (gen_random_uuid(), 'admin', 'Administrator', 'Full access to all features', TRUE, FALSE, '["*"]'::jsonb),
-    (gen_random_uuid(), 'manager', 'Manager', 'Manage staff, inventory, and reports', TRUE, FALSE,
-        '["staff.*", "inventory.*", "reports.*"]'::jsonb),
-    (gen_random_uuid(), 'staff', 'Staff Member', 'Basic access for daily operations', TRUE, TRUE,
+-- Insert default roles with all fields
+INSERT INTO roles (id, name, display_name, display_name_de, description, is_system, is_default, is_manager, can_receive_delegation, level, permissions) VALUES
+    (gen_random_uuid(), 'admin', 'Administrator', 'Administrator', 'Full access to all features', TRUE, FALSE, TRUE, FALSE, 100, '["*"]'::jsonb),
+    (gen_random_uuid(), 'manager', 'Manager', 'Manager', 'Manage staff, inventory, and reports', TRUE, FALSE, TRUE, TRUE, 50,
+        '["staff.*", "inventory.*", "reports.*", "users.read"]'::jsonb),
+    (gen_random_uuid(), 'staff', 'Staff Member', 'Mitarbeiter', 'Basic access for daily operations', TRUE, TRUE, FALSE, FALSE, 10,
         '["inventory.read", "inventory.adjust", "profile.*"]'::jsonb);

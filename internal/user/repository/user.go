@@ -36,10 +36,15 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
 		user.ID = uuid.New().String()
 	}
 
+	// Set default status if not specified
+	if user.Status == "" {
+		user.Status = "active"
+	}
+
 	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
 		query := `
-			INSERT INTO users (id, email, password_hash, name, avatar, role_id, is_active, is_access_giver, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			INSERT INTO users (id, email, password_hash, first_name, last_name, avatar_url, status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			RETURNING created_at, updated_at
 		`
 
@@ -47,12 +52,10 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
 			user.ID,
 			user.Email,
 			user.PasswordHash,
-			user.Name,
-			user.Avatar,
-			user.RoleID,
-			user.IsActive,
-			user.IsAccessGiver,
-			user.CreatedBy,
+			user.FirstName,
+			user.LastName,
+			user.AvatarURL,
+			user.Status,
 		).Scan(&user.CreatedAt, &user.UpdatedAt)
 	})
 }
@@ -68,12 +71,27 @@ func (r *UserRepository) GetByID(ctx context.Context, id string) (*domain.User, 
 	var user domain.User
 	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
 		query := `
-			SELECT id, email, password_hash, name, avatar, role_id, is_active, is_access_giver,
-			       created_by, created_at, updated_at, last_login_at, deleted_at
+			SELECT id, email, password_hash, first_name, last_name, avatar_url, status,
+			       created_at, updated_at, last_login_at, deleted_at
 			FROM users
 			WHERE id = $1 AND deleted_at IS NULL
 		`
-		return r.db.GetContext(ctx, &user, query, id)
+		var avatarURL sql.NullString
+
+		err := r.db.QueryRowContext(ctx, query, id).Scan(
+			&user.ID, &user.Email, &user.PasswordHash,
+			&user.FirstName, &user.LastName, &avatarURL, &user.Status,
+			&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt, &user.DeletedAt,
+		)
+		if err != nil {
+			return err
+		}
+
+		if avatarURL.Valid {
+			user.AvatarURL = &avatarURL.String
+		}
+
+		return nil
 	})
 
 	if err == sql.ErrNoRows {
@@ -97,12 +115,27 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.
 	var user domain.User
 	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
 		query := `
-			SELECT id, email, password_hash, name, avatar, role_id, is_active, is_access_giver,
-			       created_by, created_at, updated_at, last_login_at, deleted_at
+			SELECT id, email, password_hash, first_name, last_name, avatar_url, status,
+			       created_at, updated_at, last_login_at, deleted_at
 			FROM users
 			WHERE email = $1 AND deleted_at IS NULL
 		`
-		return r.db.GetContext(ctx, &user, query, email)
+		var avatarURL sql.NullString
+
+		err := r.db.QueryRowContext(ctx, query, email).Scan(
+			&user.ID, &user.Email, &user.PasswordHash,
+			&user.FirstName, &user.LastName, &avatarURL, &user.Status,
+			&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt, &user.DeletedAt,
+		)
+		if err != nil {
+			return err
+		}
+
+		if avatarURL.Valid {
+			user.AvatarURL = &avatarURL.String
+		}
+
+		return nil
 	})
 
 	if err == sql.ErrNoRows {
@@ -115,75 +148,22 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.
 	return &user, nil
 }
 
-// GetWithRole gets a user with their role information
+// GetWithRole gets a user with their role information using the user_roles junction table
 // TENANT-ISOLATED: Queries only the tenant's schema for user and related data
 func (r *UserRepository) GetWithRole(ctx context.Context, id string) (*domain.User, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	user, err := r.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("GetByID failed: %w", err)
 	}
 
-	// Execute role and permission queries with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
-		// Get role
-		var role domain.Role
-		roleQuery := `
-			SELECT id, name, display_name, display_name_de, description,
-			       level::text::int as level, is_manager, can_receive_delegation, created_at, updated_at
-			FROM roles
-			WHERE id = $1
-		`
-		if err := r.db.GetContext(ctx, &role, roleQuery, user.RoleID); err != nil {
-			return fmt.Errorf("role query failed for role_id %s: %w", user.RoleID, err)
-		}
-		user.Role = &role
-
-		// Get role permissions
-		permQuery := `
-			SELECT p.id, p.name, p.description, p.category, p.is_admin_only, p.created_at
-			FROM permissions p
-			JOIN role_permissions rp ON rp.permission_id = p.id
-			WHERE rp.role_id = $1
-		`
-		if err := r.db.SelectContext(ctx, &user.Role.Permissions, permQuery, role.ID); err != nil {
-			return fmt.Errorf("permissions query failed: %w", err)
-		}
-
-		// Get permission overrides
-		overrideQuery := `
-			SELECT po.id, po.user_id, po.permission_id, p.name as permission, po.granted,
-			       po.granted_by, po.granted_at, po.reason, po.expires_at
-			FROM permission_overrides po
-			JOIN permissions p ON p.id = po.permission_id
-			WHERE po.user_id = $1 AND (po.expires_at IS NULL OR po.expires_at > NOW())
-		`
-		if err := r.db.SelectContext(ctx, &user.PermissionOverrides, overrideQuery, id); err != nil {
-			return fmt.Errorf("overrides query failed: %w", err)
-		}
-
-		// Get access giver scope
-		scopeQuery := `
-			SELECT r.name
-			FROM access_giver_scope ags
-			JOIN roles r ON r.id = ags.role_id
-			WHERE ags.user_id = $1
-		`
-		if err := r.db.SelectContext(ctx, &user.AccessGiverScope, scopeQuery, id); err != nil {
-			return fmt.Errorf("scope query failed: %w", err)
-		}
-
-		return nil
-	})
-
+	// Get user's role from the user_roles junction table
+	userWithRole, err := r.GetUserWithRoleFromJunction(ctx, id)
 	if err != nil {
-		return nil, err
+		// User may not have a role assigned yet
+		return user, nil
 	}
 
+	user.Role = userWithRole.Role
 	return user, nil
 }
 
@@ -206,12 +186,12 @@ func (r *UserRepository) List(ctx context.Context, page, perPage int) ([]*domain
 		}
 
 		// Get paginated users with role from user_roles junction table
-		// Using actual schema: first_name, last_name, avatar_url, status
 		offset := (page - 1) * perPage
 		query := `
 			SELECT u.id, u.email, u.first_name, u.last_name, u.avatar_url, u.status,
 			       u.created_at, u.updated_at, u.last_login_at,
 			       r.id as role_id, r.name as role_name, r.display_name as role_display_name,
+			       r.is_manager as role_is_manager, r.level as role_level,
 			       r.permissions as role_permissions
 			FROM users u
 			LEFT JOIN user_roles ur ON ur.user_id = u.id
@@ -228,30 +208,26 @@ func (r *UserRepository) List(ctx context.Context, page, perPage int) ([]*domain
 		defer rows.Close()
 
 		for rows.Next() {
-			var firstName, lastName string
 			var avatarURL sql.NullString
-			var status string
 			var roleID sql.NullString
 			var roleName sql.NullString
 			var roleDisplayName sql.NullString
+			var roleIsManager sql.NullBool
+			var roleLevel sql.NullInt64
 			var rolePermissions []byte
 			var user domain.User
 
 			if err := rows.Scan(
-				&user.ID, &user.Email, &firstName, &lastName, &avatarURL, &status,
+				&user.ID, &user.Email, &user.FirstName, &user.LastName, &avatarURL, &user.Status,
 				&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
-				&roleID, &roleName, &roleDisplayName, &rolePermissions,
+				&roleID, &roleName, &roleDisplayName, &roleIsManager, &roleLevel, &rolePermissions,
 			); err != nil {
 				return err
 			}
 
-			// Map schema fields to domain model
-			user.Name = fmt.Sprintf("%s %s", firstName, lastName)
 			if avatarURL.Valid {
-				avatar := avatarURL.String
-				user.Avatar = &avatar
+				user.AvatarURL = &avatarURL.String
 			}
-			user.IsActive = (status == "active")
 
 			// Build role from query results
 			if roleID.Valid && roleName.Valid {
@@ -259,13 +235,15 @@ func (r *UserRepository) List(ctx context.Context, page, perPage int) ([]*domain
 					ID:          roleID.String,
 					Name:        roleName.String,
 					DisplayName: roleDisplayName.String,
-					IsManager:   (roleName.String == "admin" || roleName.String == "manager"),
+					IsManager:   roleIsManager.Valid && roleIsManager.Bool,
+					Level:       int(roleLevel.Int64),
 				}
 
 				// Parse permissions from JSONB
 				if rolePermissions != nil {
 					var permNames []string
 					if err := json.Unmarshal(rolePermissions, &permNames); err == nil {
+						user.Role.PermissionStrings = permNames
 						for _, permName := range permNames {
 							user.Role.Permissions = append(user.Role.Permissions, domain.Permission{
 								Name: permName,
@@ -299,18 +277,17 @@ func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
 	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
 		query := `
 			UPDATE users
-			SET email = $2, name = $3, avatar = $4, role_id = $5, is_active = $6, is_access_giver = $7
+			SET email = $2, first_name = $3, last_name = $4, avatar_url = $5, status = $6
 			WHERE id = $1 AND deleted_at IS NULL
 		`
 
 		result, err := r.db.ExecContext(ctx, query,
 			user.ID,
 			user.Email,
-			user.Name,
-			user.Avatar,
-			user.RoleID,
-			user.IsActive,
-			user.IsAccessGiver,
+			user.FirstName,
+			user.LastName,
+			user.AvatarURL,
+			user.Status,
 		)
 		if err != nil {
 			return err
@@ -498,42 +475,43 @@ func (r *UserRepository) GetUserWithRoleFromJunction(ctx context.Context, userID
 			FROM users
 			WHERE id = $1 AND deleted_at IS NULL
 		`
-		var firstName, lastName string
 		var avatarURL sql.NullString
-		var status string
 
 		if err := r.db.QueryRowContext(ctx, userQuery, userID).Scan(
-			&user.ID, &user.Email, &firstName, &lastName, &avatarURL, &status,
+			&user.ID, &user.Email, &user.FirstName, &user.LastName, &avatarURL, &user.Status,
 			&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
 		); err != nil {
 			return err
 		}
 
-		user.Name = fmt.Sprintf("%s %s", firstName, lastName)
 		if avatarURL.Valid {
-			avatar := avatarURL.String
-			user.Avatar = &avatar
+			user.AvatarURL = &avatarURL.String
 		}
-		user.IsActive = (status == "active")
 
-		// Get user's first role (for multi-role support, we'd need a different approach)
-		// Note: Actual schema has permissions as JSONB array on roles
+		// Get user's first role with all fields
 		roleQuery := `
-			SELECT r.id, r.name, r.display_name, r.description, r.permissions,
-			       r.created_at, r.updated_at
+			SELECT r.id, r.name, r.display_name, COALESCE(r.display_name_de, r.display_name) as display_name_de,
+			       r.description, r.is_system, r.is_default, r.is_manager, r.can_receive_delegation, r.level,
+			       r.permissions, r.created_at, r.updated_at
 			FROM roles r
 			JOIN user_roles ur ON ur.role_id = r.id
 			WHERE ur.user_id = $1
 			LIMIT 1
 		`
 		var roleData struct {
-			ID          string         `db:"id"`
-			Name        string         `db:"name"`
-			DisplayName string         `db:"display_name"`
-			Description sql.NullString `db:"description"`
-			Permissions []byte         `db:"permissions"`
-			CreatedAt   time.Time      `db:"created_at"`
-			UpdatedAt   time.Time      `db:"updated_at"`
+			ID                   string         `db:"id"`
+			Name                 string         `db:"name"`
+			DisplayName          string         `db:"display_name"`
+			DisplayNameDE        string         `db:"display_name_de"`
+			Description          sql.NullString `db:"description"`
+			IsSystem             bool           `db:"is_system"`
+			IsDefault            bool           `db:"is_default"`
+			IsManager            bool           `db:"is_manager"`
+			CanReceiveDelegation bool           `db:"can_receive_delegation"`
+			Level                int            `db:"level"`
+			Permissions          []byte         `db:"permissions"`
+			CreatedAt            time.Time      `db:"created_at"`
+			UpdatedAt            time.Time      `db:"updated_at"`
 		}
 		if err := r.db.GetContext(ctx, &roleData, roleQuery, userID); err != nil {
 			if err == sql.ErrNoRows {
@@ -544,13 +522,17 @@ func (r *UserRepository) GetUserWithRoleFromJunction(ctx context.Context, userID
 
 		// Map to domain.Role
 		user.Role = &domain.Role{
-			ID:            roleData.ID,
-			Name:          roleData.Name,
-			DisplayName:   roleData.DisplayName,
-			DisplayNameDE: roleData.DisplayName, // Use same for now
-			IsManager:     (roleData.Name == "admin" || roleData.Name == "manager"),
-			CreatedAt:     roleData.CreatedAt,
-			UpdatedAt:     roleData.UpdatedAt,
+			ID:                   roleData.ID,
+			Name:                 roleData.Name,
+			DisplayName:          roleData.DisplayName,
+			DisplayNameDE:        roleData.DisplayNameDE,
+			IsSystem:             roleData.IsSystem,
+			IsDefault:            roleData.IsDefault,
+			IsManager:            roleData.IsManager,
+			CanReceiveDelegation: roleData.CanReceiveDelegation,
+			Level:                roleData.Level,
+			CreatedAt:            roleData.CreatedAt,
+			UpdatedAt:            roleData.UpdatedAt,
 		}
 		if roleData.Description.Valid {
 			descStr := roleData.Description.String
@@ -562,8 +544,9 @@ func (r *UserRepository) GetUserWithRoleFromJunction(ctx context.Context, userID
 		if err := json.Unmarshal(roleData.Permissions, &permNames); err != nil {
 			return fmt.Errorf("failed to parse permissions: %w", err)
 		}
+		user.Role.PermissionStrings = permNames
 
-		// Convert permission names to Permission objects
+		// Also populate legacy Permissions for backwards compatibility
 		for _, permName := range permNames {
 			user.Role.Permissions = append(user.Role.Permissions, domain.Permission{
 				Name: permName,
@@ -618,44 +601,38 @@ func (r *UserRepository) FindUserAcrossTenants(ctx context.Context, email string
 	}
 
 	// Step 2: Search each tenant schema for the email
-	for _, tenant := range tenants {
+	for _, tenantInfo := range tenants {
 		// Query the tenant's schema for this email
-		// Note: Actual schema uses first_name/last_name, avatar_url, status
 		userQuery := fmt.Sprintf(`
 			SELECT id, email, password_hash, first_name, last_name, avatar_url, status,
 			       created_at, updated_at, last_login_at
 			FROM %s.users
 			WHERE email = $1 AND deleted_at IS NULL AND status = 'active'
 			LIMIT 1
-		`, tenant.SchemaName)
+		`, tenantInfo.SchemaName)
 
 		var user domain.User
-		var firstName, lastName string
 		var avatarURL sql.NullString
-		var status string
 
 		err := r.db.QueryRowContext(ctx, userQuery, email).Scan(
 			&user.ID,
 			&user.Email,
 			&user.PasswordHash,
-			&firstName,
-			&lastName,
+			&user.FirstName,
+			&user.LastName,
 			&avatarURL,
-			&status,
+			&user.Status,
 			&user.CreatedAt,
 			&user.UpdatedAt,
 			&user.LastLoginAt,
 		)
 
 		if err == nil {
-			// Found the user in this tenant - map schema fields to domain model
-			user.Name = fmt.Sprintf("%s %s", firstName, lastName)
+			// Found the user in this tenant
 			if avatarURL.Valid {
-				avatar := avatarURL.String
-				user.Avatar = &avatar
+				user.AvatarURL = &avatarURL.String
 			}
-			user.IsActive = (status == "active")
-			return &user, &tenant, nil
+			return &user, &tenantInfo, nil
 		}
 
 		if err != sql.ErrNoRows {

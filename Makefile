@@ -13,6 +13,20 @@ SERVICES=api-gateway auth-service user-service staff-service inventory-service
 # Output directory
 OUT_DIR=./bin
 
+# Database configuration (override via environment or command line)
+# Example: make migrate-up DB_HOST=prod-db.aws.com DB_SSL_MODE=require
+DB_USER ?= medflow
+DB_PASSWORD ?= devpassword
+DB_HOST ?= localhost
+DB_SSL_MODE ?= disable
+
+# Per-service database URLs (12-Factor style)
+# These can be overridden individually or via the components above
+AUTH_DATABASE_URL ?= postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):5433/medflow_auth?sslmode=$(DB_SSL_MODE)
+USER_DATABASE_URL ?= postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):5434/medflow_users?sslmode=$(DB_SSL_MODE)
+STAFF_DATABASE_URL ?= postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):5435/medflow_staff?sslmode=$(DB_SSL_MODE)
+INVENTORY_DATABASE_URL ?= postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):5436/medflow_inventory?sslmode=$(DB_SSL_MODE)
+
 help: ## Display this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
@@ -74,30 +88,30 @@ infra-down: ## Stop infrastructure
 
 migrate-up: ## Run all migrations
 	@echo "Running auth migrations..."
-	@migrate -path migrations/auth -database "postgres://medflow:devpassword@localhost:5433/medflow_auth?sslmode=disable" up
+	@migrate -path migrations/auth -database "$(AUTH_DATABASE_URL)" up
 	@echo "Running user migrations..."
-	@migrate -path migrations/user -database "postgres://medflow:devpassword@localhost:5434/medflow_users?sslmode=disable" up
+	@migrate -path migrations/user -database "$(USER_DATABASE_URL)" up
 	@echo "Running staff migrations..."
-	@migrate -path migrations/staff -database "postgres://medflow:devpassword@localhost:5435/medflow_staff?sslmode=disable" up
+	@migrate -path migrations/staff -database "$(STAFF_DATABASE_URL)" up
 	@echo "Running inventory migrations..."
-	@migrate -path migrations/inventory -database "postgres://medflow:devpassword@localhost:5436/medflow_inventory?sslmode=disable" up
+	@migrate -path migrations/inventory -database "$(INVENTORY_DATABASE_URL)" up
 
 migrate-down: ## Rollback all migrations
 	@echo "Rolling back inventory migrations..."
-	@migrate -path migrations/inventory -database "postgres://medflow:devpassword@localhost:5436/medflow_inventory?sslmode=disable" down -all
+	@migrate -path migrations/inventory -database "$(INVENTORY_DATABASE_URL)" down -all
 	@echo "Rolling back staff migrations..."
-	@migrate -path migrations/staff -database "postgres://medflow:devpassword@localhost:5435/medflow_staff?sslmode=disable" down -all
+	@migrate -path migrations/staff -database "$(STAFF_DATABASE_URL)" down -all
 	@echo "Rolling back user migrations..."
-	@migrate -path migrations/user -database "postgres://medflow:devpassword@localhost:5434/medflow_users?sslmode=disable" down -all
+	@migrate -path migrations/user -database "$(USER_DATABASE_URL)" down -all
 	@echo "Rolling back auth migrations..."
-	@migrate -path migrations/auth -database "postgres://medflow:devpassword@localhost:5433/medflow_auth?sslmode=disable" down -all
+	@migrate -path migrations/auth -database "$(AUTH_DATABASE_URL)" down -all
 
 migrate-up-%: ## Run migrations for a specific service (e.g., make migrate-up-auth)
 	@echo "Running $* migrations..."
-	@migrate -path migrations/$* -database "postgres://medflow:devpassword@localhost:$(shell case $* in auth) echo 5433;; user) echo 5434;; staff) echo 5435;; inventory) echo 5436;; esac)/medflow_$*?sslmode=disable" up
+	@migrate -path migrations/$* -database "$($(shell echo $* | tr '[:lower:]' '[:upper:]')_DATABASE_URL)" up
 
 migrate-down-%: ## Rollback migrations for a specific service
-	@migrate -path migrations/$* -database "postgres://medflow:devpassword@localhost:$(shell case $* in auth) echo 5433;; user) echo 5434;; staff) echo 5435;; inventory) echo 5436;; esac)/medflow_$*?sslmode=disable" down 1
+	@migrate -path migrations/$* -database "$($(shell echo $* | tr '[:lower:]' '[:upper:]')_DATABASE_URL)" down 1
 
 ## Bridge Model: Tenant Schema Migrations (per service)
 
@@ -105,22 +119,22 @@ migrate-down-%: ## Rollback migrations for a specific service
 migrate-user-tenant-up: ## Create tenant schema in user DB (Usage: TENANT=test_practice)
 	@if [ -z "$(TENANT)" ]; then echo "Error: TENANT not specified. Usage: make migrate-user-tenant-up TENANT=test_practice"; exit 1; fi
 	@echo "Creating tenant schema in user service for tenant_$(TENANT)..."
-	@docker exec -i medflow-db-users psql -U medflow -d medflow_users -c "CREATE SCHEMA IF NOT EXISTS tenant_$(TENANT);"
-	@~/go/bin/migrate -path migrations/user/tenant -database "postgresql://medflow:devpassword@localhost:5434/medflow_users?sslmode=disable&search_path=tenant_$(TENANT)" up
+	@docker exec -i medflow-db-users psql -U $(DB_USER) -d medflow_users -c "CREATE SCHEMA IF NOT EXISTS tenant_$(TENANT);"
+	@~/go/bin/migrate -path migrations/user/tenant -database "$(USER_DATABASE_URL)&search_path=tenant_$(TENANT)" up
 
 # Staff service tenant migrations
 migrate-staff-tenant-up: ## Create tenant schema in staff DB (Usage: TENANT=test_practice)
 	@if [ -z "$(TENANT)" ]; then echo "Error: TENANT not specified. Usage: make migrate-staff-tenant-up TENANT=test_practice"; exit 1; fi
 	@echo "Creating tenant schema in staff service for tenant_$(TENANT)..."
-	@docker exec -i medflow-db-staff psql -U medflow -d medflow_staff -c "CREATE SCHEMA IF NOT EXISTS tenant_$(TENANT);"
-	@~/go/bin/migrate -path migrations/staff/tenant -database "postgresql://medflow:devpassword@localhost:5435/medflow_staff?sslmode=disable&search_path=tenant_$(TENANT)" up
+	@docker exec -i medflow-db-staff psql -U $(DB_USER) -d medflow_staff -c "CREATE SCHEMA IF NOT EXISTS tenant_$(TENANT);"
+	@~/go/bin/migrate -path migrations/staff/tenant -database "$(STAFF_DATABASE_URL)&search_path=tenant_$(TENANT)" up
 
 # Inventory service tenant migrations
 migrate-inventory-tenant-up: ## Create tenant schema in inventory DB (Usage: TENANT=test_practice)
 	@if [ -z "$(TENANT)" ]; then echo "Error: TENANT not specified. Usage: make migrate-inventory-tenant-up TENANT=test_practice"; exit 1; fi
 	@echo "Creating tenant schema in inventory service for tenant_$(TENANT)..."
-	@docker exec -i medflow-db-inventory psql -U medflow -d medflow_inventory -c "CREATE SCHEMA IF NOT EXISTS tenant_$(TENANT);"
-	@~/go/bin/migrate -path migrations/inventory/tenant -database "postgresql://medflow:devpassword@localhost:5436/medflow_inventory?sslmode=disable&search_path=tenant_$(TENANT)" up
+	@docker exec -i medflow-db-inventory psql -U $(DB_USER) -d medflow_inventory -c "CREATE SCHEMA IF NOT EXISTS tenant_$(TENANT);"
+	@~/go/bin/migrate -path migrations/inventory/tenant -database "$(INVENTORY_DATABASE_URL)&search_path=tenant_$(TENANT)" up
 
 # Create tenant across ALL services
 create-tenant: ## Create tenant across all service databases (Usage: TENANT=test_practice)

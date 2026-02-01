@@ -25,10 +25,10 @@ import (
 )
 
 func main() {
-	// Load configuration
-	cfg, err := config.Load("staff-service")
+	// Load configuration with validation (fails fast in production if required config is missing)
+	cfg, err := config.LoadWithValidation("staff-service")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "configuration error: %v\n", err)
 		os.Exit(1)
 	}
 

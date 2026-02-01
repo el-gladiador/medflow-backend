@@ -160,7 +160,7 @@ CREATE TABLE stock_adjustments (
 
     -- Timestamps
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by UUID  -- Cross-service reference to user,
+    created_by UUID,  -- Cross-service reference to user
 
     -- Constraints
     CONSTRAINT adjustments_type_valid CHECK (
@@ -247,3 +247,21 @@ CREATE TRIGGER inventory_items_updated_at
 CREATE TRIGGER inventory_batches_updated_at
     BEFORE UPDATE ON inventory_batches
     FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+-- User Cache (event-synced from user-service)
+-- This table stores denormalized user data for cross-service reference
+-- Updated via RabbitMQ events: user.created, user.updated, user.deleted
+CREATE TABLE user_cache (
+    user_id UUID PRIMARY KEY,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    email VARCHAR(255),
+    role_name VARCHAR(100),
+    tenant_id UUID NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_user_cache_tenant ON user_cache(tenant_id);
+CREATE INDEX idx_user_cache_email ON user_cache(email) WHERE email IS NOT NULL;
+
+COMMENT ON TABLE user_cache IS 'Event-synced cache of user data from user-service for cross-service reference';

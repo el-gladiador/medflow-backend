@@ -24,15 +24,23 @@ func generateSessionID() string {
 // AuthService handles authentication logic
 type AuthService struct {
 	repo       *repository.SessionRepository
+	lookupRepo *repository.UserTenantLookupRepository
 	jwtManager *jwt.Manager
 	config     *config.Config
 	logger     *logger.Logger
 }
 
 // NewAuthService creates a new auth service
-func NewAuthService(repo *repository.SessionRepository, jwtManager *jwt.Manager, cfg *config.Config, log *logger.Logger) *AuthService {
+func NewAuthService(
+	repo *repository.SessionRepository,
+	lookupRepo *repository.UserTenantLookupRepository,
+	jwtManager *jwt.Manager,
+	cfg *config.Config,
+	log *logger.Logger,
+) *AuthService {
 	return &AuthService{
 		repo:       repo,
+		lookupRepo: lookupRepo,
 		jwtManager: jwtManager,
 		config:     cfg,
 		logger:     log,
@@ -58,8 +66,9 @@ type LoginResponse struct {
 type UserInfo struct {
 	ID          string   `json:"id"`
 	Email       string   `json:"email"`
-	Name        string   `json:"name"`
-	Avatar      string   `json:"avatar"`
+	FirstName   string   `json:"first_name"`
+	LastName    string   `json:"last_name"`
+	AvatarURL   string   `json:"avatar_url"`
 	Role        string   `json:"role"`
 	Permissions []string `json:"permissions"`
 	IsManager   bool     `json:"is_manager"`
@@ -68,6 +77,11 @@ type UserInfo struct {
 	TenantID     string `json:"tenant_id,omitempty"`
 	TenantSlug   string `json:"tenant_slug,omitempty"`
 	TenantSchema string `json:"tenant_schema,omitempty"`
+}
+
+// FullName returns the user's full name
+func (u *UserInfo) FullName() string {
+	return u.FirstName + " " + u.LastName
 }
 
 // Login authenticates a user and returns tokens
@@ -84,7 +98,8 @@ func (s *AuthService) Login(ctx context.Context, req *LoginRequest, userAgent, i
 	tokenInfo := &jwt.UserInfo{
 		ID:          user.ID,
 		Email:       user.Email,
-		Name:        user.Name,
+		FirstName:   user.FirstName,
+		LastName:    user.LastName,
 		Role:        user.Role,
 		Permissions: user.Permissions,
 		IsManager:   user.IsManager,
@@ -157,7 +172,8 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*jwt.To
 	tokenInfo := &jwt.UserInfo{
 		ID:          user.ID,
 		Email:       user.Email,
-		Name:        user.Name,
+		FirstName:   user.FirstName,
+		LastName:    user.LastName,
 		Role:        user.Role,
 		Permissions: user.Permissions,
 		IsManager:   user.IsManager,
@@ -188,7 +204,23 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, userID, tenantID, tena
 }
 
 // validateCredentials validates user credentials against user service
+// Uses the user-tenant lookup table for O(1) tenant resolution
 func (s *AuthService) validateCredentials(ctx context.Context, email, password string) (*UserInfo, error) {
+	// Step 1: O(1) tenant lookup using the user-tenant lookup table
+	lookup, err := s.lookupRepo.GetByEmail(ctx, email)
+	if err != nil {
+		s.logger.Debug().Str("email", email).Msg("email not found in lookup table")
+		// Return generic invalid credentials to avoid email enumeration
+		return nil, errors.InvalidCredentials()
+	}
+
+	s.logger.Debug().
+		Str("email", email).
+		Str("tenant_id", lookup.TenantID).
+		Str("tenant_schema", lookup.TenantSchema).
+		Msg("tenant resolved from lookup table")
+
+	// Step 2: Call user service WITH tenant headers for tenant-scoped validation
 	url := fmt.Sprintf("%s/api/v1/internal/validate-credentials", s.config.Services.UserServiceURL)
 
 	requestBody := struct {
@@ -207,6 +239,11 @@ func (s *AuthService) validateCredentials(ctx context.Context, email, password s
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+
+	// CRITICAL: Forward tenant headers for Schema-per-Tenant isolation
+	req.Header.Set("X-Tenant-ID", lookup.TenantID)
+	req.Header.Set("X-Tenant-Slug", lookup.TenantSlug)
+	req.Header.Set("X-Tenant-Schema", lookup.TenantSchema)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -230,6 +267,13 @@ func (s *AuthService) validateCredentials(ctx context.Context, email, password s
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, errors.Internal("failed to parse response")
+	}
+
+	// Ensure tenant context is populated in response
+	if result.Data != nil {
+		result.Data.TenantID = lookup.TenantID
+		result.Data.TenantSlug = lookup.TenantSlug
+		result.Data.TenantSchema = lookup.TenantSchema
 	}
 
 	return result.Data, nil

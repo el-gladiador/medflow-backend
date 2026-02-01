@@ -73,21 +73,47 @@ func (e *Event) UnmarshalData(v interface{}) error {
 
 // UserCreatedEvent is published when a user is created
 type UserCreatedEvent struct {
-	UserID   string `json:"user_id"`
-	Email    string `json:"email"`
-	Name     string `json:"name"`
-	RoleName string `json:"role_name"`
+	UserID    string `json:"user_id"`
+	Email     string `json:"email"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	RoleName  string `json:"role_name"`
+
+	// Tenant context (required for user-tenant lookup table)
+	TenantID     string `json:"tenant_id"`
+	TenantSlug   string `json:"tenant_slug"`
+	TenantSchema string `json:"tenant_schema"`
+}
+
+// FullName returns the user's full name
+func (e *UserCreatedEvent) FullName() string {
+	return e.FirstName + " " + e.LastName
 }
 
 // UserUpdatedEvent is published when a user is updated
 type UserUpdatedEvent struct {
 	UserID string         `json:"user_id"`
 	Fields map[string]any `json:"fields"` // Changed fields
+
+	// Email change tracking (for updating user-tenant lookup table)
+	OldEmail *string `json:"old_email,omitempty"`
+	NewEmail *string `json:"new_email,omitempty"`
+
+	// Tenant context (required for user-tenant lookup table)
+	TenantID     string `json:"tenant_id"`
+	TenantSlug   string `json:"tenant_slug"`
+	TenantSchema string `json:"tenant_schema"`
 }
 
 // UserDeletedEvent is published when a user is deleted
 type UserDeletedEvent struct {
 	UserID string `json:"user_id"`
+	Email  string `json:"email"` // Required for removing from user-tenant lookup table
+
+	// Tenant context (required for user-tenant lookup table)
+	TenantID     string `json:"tenant_id"`
+	TenantSlug   string `json:"tenant_slug"`
+	TenantSchema string `json:"tenant_schema"`
 }
 
 // UserRoleChangedEvent is published when a user's role changes

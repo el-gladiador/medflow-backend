@@ -99,8 +99,9 @@ func (h *UserHandler) GetUserInternal(w http.ResponseWriter, r *http.Request) {
 	response := map[string]interface{}{
 		"id":          user.ID,
 		"email":       user.Email,
-		"name":        user.Name,
-		"avatar":      user.Avatar,
+		"first_name":  user.FirstName,
+		"last_name":   user.LastName,
+		"avatar_url":  user.AvatarURL,
 		"role":        user.Role.Name,
 		"permissions": user.GetEffectivePermissions(),
 		"is_manager":  user.Role.IsManager,
@@ -321,6 +322,9 @@ func (h *UserHandler) RevokeAccessGiver(w http.ResponseWriter, r *http.Request) 
 }
 
 // ValidateCredentials validates user credentials (internal endpoint)
+// Supports two paths:
+// 1. O(1) tenant-aware path: When X-Tenant-* headers are present (from auth service lookup table)
+// 2. Legacy O(N) path: Cross-tenant search when headers are missing (fallback during migration)
 func (h *UserHandler) ValidateCredentials(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email    string `json:"email" validate:"required,email"`
@@ -331,9 +335,60 @@ func (h *UserHandler) ValidateCredentials(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Check for tenant headers (new O(1) path from lookup table)
+	tenantID := r.Header.Get("X-Tenant-ID")
+	tenantSlug := r.Header.Get("X-Tenant-Slug")
+	tenantSchema := r.Header.Get("X-Tenant-Schema")
+
+	if tenantID != "" && tenantSchema != "" {
+		// NEW PATH: O(1) tenant-aware validation
+		h.logger.Debug().
+			Str("email", req.Email).
+			Str("tenant_id", tenantID).
+			Str("tenant_schema", tenantSchema).
+			Msg("validating credentials with tenant context (O(1) path)")
+
+		// Add tenant context to request context
+		ctx := tenant.WithTenantContext(r.Context(), tenantID, tenantSlug, tenantSchema)
+
+		user, err := h.service.ValidateCredentialsInTenant(ctx, req.Email, req.Password)
+		if err != nil {
+			h.logger.Debug().Str("email", req.Email).Msg("credential validation failed")
+			httputil.Error(w, err)
+			return
+		}
+
+		// Extract permissions from role and overrides
+		permissions := user.GetEffectivePermissions()
+
+		// Return user info WITH tenant context for auth service
+		response := map[string]interface{}{
+			"id":          user.ID,
+			"email":       user.Email,
+			"first_name":  user.FirstName,
+			"last_name":   user.LastName,
+			"avatar_url":  user.AvatarURL,
+			"role":        user.Role.Name,
+			"permissions": permissions,
+			"is_manager":  user.Role.IsManager,
+			// Tenant context from headers
+			"tenant_id":     tenantID,
+			"tenant_slug":   tenantSlug,
+			"tenant_schema": tenantSchema,
+		}
+
+		httputil.JSON(w, http.StatusOK, response)
+		return
+	}
+
+	// LEGACY PATH: O(N) cross-tenant search (fallback during migration period)
+	h.logger.Debug().
+		Str("email", req.Email).
+		Msg("validating credentials without tenant context (legacy O(N) path)")
+
 	user, tenantInfo, err := h.service.ValidateCredentials(r.Context(), req.Email, req.Password)
 	if err != nil {
-		h.logger.Error().Err(err).Str("email", req.Email).Msg("validate credentials failed")
+		h.logger.Debug().Str("email", req.Email).Msg("credential validation failed")
 		httputil.Error(w, err)
 		return
 	}
@@ -345,8 +400,9 @@ func (h *UserHandler) ValidateCredentials(w http.ResponseWriter, r *http.Request
 	response := map[string]interface{}{
 		"id":     user.ID,
 		"email":  user.Email,
-		"name":   user.Name,
-		"avatar": user.Avatar,
+		"first_name":  user.FirstName,
+		"last_name":   user.LastName,
+		"avatar_url":  user.AvatarURL,
 		"role":   user.Role.Name,
 
 		"permissions": permissions,

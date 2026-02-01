@@ -250,3 +250,21 @@ CREATE TRIGGER employee_social_insurance_updated_at
 CREATE TRIGGER employee_documents_updated_at
     BEFORE UPDATE ON employee_documents
     FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+-- User Cache (event-synced from user-service)
+-- This table stores denormalized user data for cross-service reference
+-- Updated via RabbitMQ events: user.created, user.updated, user.deleted
+CREATE TABLE user_cache (
+    user_id UUID PRIMARY KEY,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    email VARCHAR(255),
+    role_name VARCHAR(100),
+    tenant_id UUID NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_user_cache_tenant ON user_cache(tenant_id);
+CREATE INDEX idx_user_cache_email ON user_cache(email) WHERE email IS NOT NULL;
+
+COMMENT ON TABLE user_cache IS 'Event-synced cache of user data from user-service for cross-service reference';

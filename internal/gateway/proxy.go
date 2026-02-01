@@ -71,7 +71,7 @@ func (p *Proxy) ForwardToUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 // ForwardToUsersPublic forwards public requests to the user service
-// These are unauthenticated endpoints like invitation acceptance
+// These are unauthenticated endpoints (currently unused - invitations removed)
 func (p *Proxy) ForwardToUsersPublic(w http.ResponseWriter, r *http.Request) {
 	p.userProxy.ServeHTTP(w, r)
 }

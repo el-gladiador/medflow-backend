@@ -6,6 +6,7 @@ import (
 	"github.com/medflow/medflow-backend/internal/inventory/repository"
 	"github.com/medflow/medflow-backend/pkg/logger"
 	"github.com/medflow/medflow-backend/pkg/messaging"
+	"github.com/medflow/medflow-backend/pkg/tenant"
 )
 
 // UserEventConsumer consumes user events
@@ -54,14 +55,19 @@ func (c *UserEventConsumer) handleUserCreated(ctx context.Context, event *messag
 
 	c.logger.Info().
 		Str("user_id", data.UserID).
-		Str("name", data.Name).
+		Str("name", data.FullName()).
 		Msg("received user created event")
 
+	// Create tenant context from event data
+	ctx = tenant.WithTenantContext(ctx, data.TenantID, data.TenantSlug, data.TenantSchema)
+
 	return c.userCacheRepo.Set(ctx, &repository.CachedUser{
-		UserID:   data.UserID,
-		Name:     data.Name,
-		Email:    &data.Email,
-		RoleName: &data.RoleName,
+		UserID:    data.UserID,
+		FirstName: data.FirstName,
+		LastName:  data.LastName,
+		Email:     &data.Email,
+		RoleName:  &data.RoleName,
+		TenantID:  data.TenantID,
 	})
 }
 
@@ -75,14 +81,23 @@ func (c *UserEventConsumer) handleUserUpdated(ctx context.Context, event *messag
 		Str("user_id", data.UserID).
 		Msg("received user updated event")
 
+	// Create tenant context from event data
+	ctx = tenant.WithTenantContext(ctx, data.TenantID, data.TenantSlug, data.TenantSchema)
+
 	existing, _ := c.userCacheRepo.Get(ctx, data.UserID)
 	if existing == nil {
 		return nil
 	}
 
-	if name, ok := data.Fields["name"].(map[string]interface{}); ok {
-		if newName, ok := name["to"].(string); ok {
-			existing.Name = newName
+	// Update fields that changed
+	if firstName, ok := data.Fields["first_name"].(map[string]interface{}); ok {
+		if newName, ok := firstName["to"].(string); ok {
+			existing.FirstName = newName
+		}
+	}
+	if lastName, ok := data.Fields["last_name"].(map[string]interface{}); ok {
+		if newName, ok := lastName["to"].(string); ok {
+			existing.LastName = newName
 		}
 	}
 
@@ -98,6 +113,9 @@ func (c *UserEventConsumer) handleUserDeleted(ctx context.Context, event *messag
 	c.logger.Info().
 		Str("user_id", data.UserID).
 		Msg("received user deleted event")
+
+	// Create tenant context from event data
+	ctx = tenant.WithTenantContext(ctx, data.TenantID, data.TenantSlug, data.TenantSchema)
 
 	return c.userCacheRepo.Delete(ctx, data.UserID)
 }
