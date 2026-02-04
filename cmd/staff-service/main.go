@@ -56,19 +56,28 @@ func main() {
 		log.Fatal().Err(err).Msg("failed to create event publisher")
 	}
 
-	// Initialize repository
+	// Initialize repositories
 	employeeRepo := repository.NewEmployeeRepository(db)
 	userCacheRepo := repository.NewUserCacheRepository(db)
+	shiftRepo := repository.NewShiftRepository(db)
+	absenceRepo := repository.NewAbsenceRepository(db)
+	timeTrackingRepo := repository.NewTimeTrackingRepository(db)
 
 	// Initialize validators
 	germanValidator := validation.NewGermanValidator()
 
-	// Initialize service
+	// Initialize services
 	staffService := service.NewStaffService(employeeRepo, publisher, germanValidator, log)
+	shiftService := service.NewShiftService(shiftRepo, publisher, log)
+	absenceService := service.NewAbsenceService(absenceRepo, publisher, log)
+	timeTrackingService := service.NewTimeTrackingService(timeTrackingRepo, publisher, log)
 
 	// Initialize handlers
 	employeeHandler := handler.NewEmployeeHandler(staffService, log)
 	validationHandler := handler.NewValidationHandler(germanValidator, log)
+	shiftHandler := handler.NewShiftHandler(shiftService, log)
+	absenceHandler := handler.NewAbsenceHandler(absenceService, log)
+	timeTrackingHandler := handler.NewTimeTrackingHandler(timeTrackingService, log)
 
 	// Start user event consumer
 	userConsumer, err := consumers.NewUserEventConsumer(rmq, userCacheRepo, log)
@@ -120,10 +129,75 @@ func main() {
 			r.Delete("/{id}/files/{fileId}", employeeHandler.DeleteFile)
 		})
 
+		// Shift Template routes
+		r.Route("/templates", func(r chi.Router) {
+			r.Get("/", shiftHandler.ListTemplates)
+			r.Post("/", shiftHandler.CreateTemplate)
+			r.Get("/{id}", shiftHandler.GetTemplate)
+			r.Put("/{id}", shiftHandler.UpdateTemplate)
+			r.Delete("/{id}", shiftHandler.DeleteTemplate)
+		})
+
+		// Shift Assignment routes
+		r.Route("/shifts", func(r chi.Router) {
+			r.Get("/", shiftHandler.List)
+			r.Post("/", shiftHandler.Create)
+			r.Post("/bulk", shiftHandler.BulkCreate)
+			r.Get("/{id}", shiftHandler.Get)
+			r.Put("/{id}", shiftHandler.Update)
+			r.Delete("/{id}", shiftHandler.Delete)
+		})
+
+		// Absence routes
+		r.Route("/absences", func(r chi.Router) {
+			r.Get("/", absenceHandler.List)
+			r.Post("/", absenceHandler.Create)
+			r.Get("/{id}", absenceHandler.Get)
+			r.Put("/{id}", absenceHandler.Update)
+			r.Delete("/{id}", absenceHandler.Delete)
+			r.Put("/{id}/approve", absenceHandler.Approve)
+			r.Put("/{id}/reject", absenceHandler.Reject)
+		})
+
+		// Vacation info routes
+		r.Get("/vacation-info", absenceHandler.ListVacationBalances)
+
+		// Employee-specific scheduling routes (nested under employee ID)
+		r.Route("/{employeeId}", func(r chi.Router) {
+			r.Get("/shifts", shiftHandler.GetEmployeeShifts)
+			r.Get("/absences", absenceHandler.GetEmployeeAbsences)
+			r.Get("/vacation-info", absenceHandler.GetEmployeeVacationBalance)
+			r.Put("/vacation-info", absenceHandler.SetVacationEntitlement)
+		})
+
 		// Validation routes
 		r.Post("/validate/iban", validationHandler.ValidateIBAN)
 		r.Post("/validate/tax-id", validationHandler.ValidateTaxID)
 		r.Post("/validate/sv-number", validationHandler.ValidateSVNumber)
+	})
+
+	// Time Tracking routes (under /api/v1/time-tracking)
+	r.Route("/api/v1/time-tracking", func(r chi.Router) {
+		// Status and entries
+		r.Get("/statuses", timeTrackingHandler.GetAllStatuses)
+		r.Get("/entries", timeTrackingHandler.GetEntriesByDate)
+		r.Patch("/entries/{id}", timeTrackingHandler.UpdateEntry)
+		r.Delete("/entries/{id}", timeTrackingHandler.DeleteEntry)
+
+		// Corrections
+		r.Post("/corrections", timeTrackingHandler.CreateCorrection)
+
+		// Employee-specific time tracking
+		r.Route("/employees/{id}", func(r chi.Router) {
+			r.Post("/clock-in", timeTrackingHandler.ClockIn)
+			r.Post("/clock-out", timeTrackingHandler.ClockOut)
+			r.Post("/break/start", timeTrackingHandler.StartBreak)
+			r.Post("/break/end", timeTrackingHandler.EndBreak)
+			r.Post("/manual-clock-in", timeTrackingHandler.ManualClockIn)
+			r.Post("/manual-clock-out", timeTrackingHandler.ManualClockOut)
+			r.Get("/history", timeTrackingHandler.GetEmployeeHistory)
+			r.Get("/corrections", timeTrackingHandler.GetEmployeeCorrections)
+		})
 	})
 
 	// Create server

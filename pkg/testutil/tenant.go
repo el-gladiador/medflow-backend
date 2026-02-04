@@ -348,6 +348,143 @@ func InventoryMigrations() []string {
 	}
 }
 
+// TimeTrackingMigrations returns the time tracking migrations for tests
+// These should be applied AFTER StaffMigrations (depends on employees table)
+func TimeTrackingMigrations() []string {
+	return []string{
+		// Time entries table
+		`CREATE TABLE IF NOT EXISTS time_entries (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+			work_date DATE NOT NULL,
+			clock_in TIMESTAMPTZ NOT NULL,
+			clock_out TIMESTAMPTZ,
+			gross_minutes INT,
+			net_minutes INT,
+			break_minutes INT DEFAULT 0,
+			status VARCHAR(20) NOT NULL DEFAULT 'active',
+			entry_type VARCHAR(20) NOT NULL DEFAULT 'clock',
+			shift_assignment_id UUID,
+			has_arbzg_violation BOOLEAN DEFAULT FALSE,
+			violation_types JSONB DEFAULT '[]',
+			notes TEXT,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			deleted_at TIMESTAMPTZ,
+			created_by UUID,
+			updated_by UUID
+		)`,
+
+		// Time entry breaks table
+		`CREATE TABLE IF NOT EXISTS time_entry_breaks (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			time_entry_id UUID NOT NULL REFERENCES time_entries(id) ON DELETE CASCADE,
+			break_start TIMESTAMPTZ NOT NULL,
+			break_end TIMESTAMPTZ,
+			duration_minutes INT,
+			break_type VARCHAR(20) NOT NULL DEFAULT 'regular',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+
+		// Shift templates table
+		`CREATE TABLE IF NOT EXISTS shift_templates (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			name VARCHAR(100) NOT NULL,
+			description TEXT,
+			start_time TIME NOT NULL,
+			end_time TIME NOT NULL,
+			break_duration_minutes INT DEFAULT 30,
+			shift_type VARCHAR(20) NOT NULL DEFAULT 'regular',
+			color VARCHAR(7) DEFAULT '#22c55e',
+			is_active BOOLEAN DEFAULT TRUE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			deleted_at TIMESTAMPTZ,
+			created_by UUID
+		)`,
+
+		// Shift assignments table
+		`CREATE TABLE IF NOT EXISTS shift_assignments (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+			shift_template_id UUID REFERENCES shift_templates(id) ON DELETE SET NULL,
+			shift_date DATE NOT NULL,
+			start_time TIME NOT NULL,
+			end_time TIME NOT NULL,
+			break_duration_minutes INT DEFAULT 30,
+			shift_type VARCHAR(20) NOT NULL DEFAULT 'regular',
+			status VARCHAR(20) NOT NULL DEFAULT 'scheduled',
+			has_conflict BOOLEAN DEFAULT FALSE,
+			conflict_reason TEXT,
+			notes TEXT,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			deleted_at TIMESTAMPTZ,
+			created_by UUID,
+			updated_by UUID
+		)`,
+
+		// Absences table
+		`CREATE TABLE IF NOT EXISTS absences (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+			start_date DATE NOT NULL,
+			end_date DATE NOT NULL,
+			absence_type VARCHAR(30) NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			reviewed_by UUID,
+			reviewed_at TIMESTAMPTZ,
+			rejection_reason TEXT,
+			vacation_days_used DECIMAL(4,1),
+			employee_note TEXT,
+			manager_note TEXT,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			deleted_at TIMESTAMPTZ,
+			created_by UUID,
+			updated_by UUID
+		)`,
+
+		// Vacation balances table
+		`CREATE TABLE IF NOT EXISTS vacation_balances (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+			year INT NOT NULL,
+			annual_entitlement DECIMAL(4,1) NOT NULL,
+			carryover_from_previous DECIMAL(4,1) DEFAULT 0,
+			additional_granted DECIMAL(4,1) DEFAULT 0,
+			taken DECIMAL(4,1) DEFAULT 0,
+			planned DECIMAL(4,1) DEFAULT 0,
+			pending DECIMAL(4,1) DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			CONSTRAINT vacation_balances_unique UNIQUE (employee_id, year)
+		)`,
+
+		// ArbZG compliance log table
+		`CREATE TABLE IF NOT EXISTS arbzg_compliance_log (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+			time_entry_id UUID REFERENCES time_entries(id) ON DELETE SET NULL,
+			violation_date DATE NOT NULL,
+			violation_type VARCHAR(50) NOT NULL,
+			severity VARCHAR(20) NOT NULL DEFAULT 'warning',
+			description TEXT NOT NULL,
+			details JSONB,
+			acknowledged_by UUID,
+			acknowledged_at TIMESTAMPTZ,
+			resolution_note TEXT,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+
+		// Indexes for time entries
+		`CREATE INDEX IF NOT EXISTS idx_time_entries_employee ON time_entries(employee_id) WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_time_entries_work_date ON time_entries(work_date) WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_time_entries_active ON time_entries(employee_id) WHERE status = 'active' AND deleted_at IS NULL`,
+	}
+}
+
 // StaffMigrations returns the standard staff service migrations for tests
 // Matches the actual schema from migrations/staff/tenant/000001_create_tenant_schema.up.sql
 func StaffMigrations() []string {

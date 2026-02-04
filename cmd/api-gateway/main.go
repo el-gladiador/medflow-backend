@@ -110,6 +110,7 @@ func main() {
 
 			// Staff routes
 			r.Route("/staff", func(r chi.Router) {
+				// Employee routes
 				r.Route("/employees", func(r chi.Router) {
 					r.Get("/", proxy.ForwardToStaff)
 					r.Post("/", proxy.ForwardToStaff)
@@ -123,9 +124,76 @@ func main() {
 					r.Post("/{id}/files", proxy.ForwardToStaff)
 					r.Delete("/{id}/files/{fileId}", proxy.ForwardToStaff)
 				})
+
+				// Shift Template routes
+				r.Route("/templates", func(r chi.Router) {
+					r.Get("/", proxy.ForwardToStaff)
+					r.Post("/", proxy.ForwardToStaff)
+					r.Get("/{id}", proxy.ForwardToStaff)
+					r.Put("/{id}", proxy.ForwardToStaff)
+					r.Delete("/{id}", proxy.ForwardToStaff)
+				})
+
+				// Shift Assignment routes
+				r.Route("/shifts", func(r chi.Router) {
+					r.Get("/", proxy.ForwardToStaff)
+					r.Post("/", proxy.ForwardToStaff)
+					r.Post("/bulk", proxy.ForwardToStaff)
+					r.Get("/{id}", proxy.ForwardToStaff)
+					r.Put("/{id}", proxy.ForwardToStaff)
+					r.Delete("/{id}", proxy.ForwardToStaff)
+				})
+
+				// Absence routes
+				r.Route("/absences", func(r chi.Router) {
+					r.Get("/", proxy.ForwardToStaff)
+					r.Post("/", proxy.ForwardToStaff)
+					r.Get("/{id}", proxy.ForwardToStaff)
+					r.Put("/{id}", proxy.ForwardToStaff)
+					r.Delete("/{id}", proxy.ForwardToStaff)
+					r.Put("/{id}/approve", proxy.ForwardToStaff)
+					r.Put("/{id}/reject", proxy.ForwardToStaff)
+				})
+
+				// Vacation info routes
+				r.Get("/vacation-info", proxy.ForwardToStaff)
+
+				// Employee-specific scheduling routes
+				r.Route("/{employeeId}", func(r chi.Router) {
+					r.Get("/shifts", proxy.ForwardToStaff)
+					r.Get("/absences", proxy.ForwardToStaff)
+					r.Get("/vacation-info", proxy.ForwardToStaff)
+					r.Put("/vacation-info", proxy.ForwardToStaff)
+				})
+
+				// Validation routes
 				r.Post("/validate/iban", proxy.ForwardToStaff)
 				r.Post("/validate/tax-id", proxy.ForwardToStaff)
 				r.Post("/validate/sv-number", proxy.ForwardToStaff)
+			})
+
+			// Time Tracking routes
+			r.Route("/time-tracking", func(r chi.Router) {
+				// Status and entries
+				r.Get("/statuses", proxy.ForwardToStaff)
+				r.Get("/entries", proxy.ForwardToStaff)
+				r.Patch("/entries/{id}", proxy.ForwardToStaff)
+				r.Delete("/entries/{id}", proxy.ForwardToStaff)
+
+				// Corrections
+				r.Post("/corrections", proxy.ForwardToStaff)
+
+				// Employee-specific time tracking
+				r.Route("/employees/{id}", func(r chi.Router) {
+					r.Post("/clock-in", proxy.ForwardToStaff)
+					r.Post("/clock-out", proxy.ForwardToStaff)
+					r.Post("/break/start", proxy.ForwardToStaff)
+					r.Post("/break/end", proxy.ForwardToStaff)
+					r.Post("/manual-clock-in", proxy.ForwardToStaff)
+					r.Post("/manual-clock-out", proxy.ForwardToStaff)
+					r.Get("/history", proxy.ForwardToStaff)
+					r.Get("/corrections", proxy.ForwardToStaff)
+				})
 			})
 
 			// Inventory routes

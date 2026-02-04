@@ -132,6 +132,14 @@ func (s *IntegrationSuite) SetupStaffTenant(t *testing.T, ctx context.Context, n
 	return s.SetupTenant(t, ctx, name, StaffMigrations())
 }
 
+// SetupStaffWithTimeTrackingTenant creates a tenant with staff + time tracking migrations
+func (s *IntegrationSuite) SetupStaffWithTimeTrackingTenant(t *testing.T, ctx context.Context, name string) *TestTenant {
+	migrations := make([]string, 0)
+	migrations = append(migrations, StaffMigrations()...)
+	migrations = append(migrations, TimeTrackingMigrations()...)
+	return s.SetupTenant(t, ctx, name, migrations)
+}
+
 // SetupFullTenant creates a tenant with all service migrations
 func (s *IntegrationSuite) SetupFullTenant(t *testing.T, ctx context.Context, name string) *TestTenant {
 	migrations := make([]string, 0)

@@ -20,6 +20,24 @@ const (
 	EventEmployeeUpdated = "staff.employee.updated"
 	EventEmployeeDeleted = "staff.employee.deleted"
 
+	// Shift events
+	EventShiftCreated = "staff.shift.created"
+	EventShiftUpdated = "staff.shift.updated"
+	EventShiftDeleted = "staff.shift.deleted"
+
+	// Absence events
+	EventAbsenceCreated  = "staff.absence.created"
+	EventAbsenceUpdated  = "staff.absence.updated"
+	EventAbsenceApproved = "staff.absence.approved"
+	EventAbsenceRejected = "staff.absence.rejected"
+	EventAbsenceDeleted  = "staff.absence.deleted"
+
+	// Time tracking events
+	EventTimeClockIn    = "staff.time.clock_in"
+	EventTimeClockOut   = "staff.time.clock_out"
+	EventTimeBreakStart = "staff.time.break_start"
+	EventTimeBreakEnd   = "staff.time.break_end"
+
 	// Inventory events
 	EventStockAdjusted   = "inventory.stock.adjusted"
 	EventBatchExpiring   = "inventory.batch.expiring"
@@ -148,6 +166,107 @@ type EmployeeUpdatedEvent struct {
 // EmployeeDeletedEvent is published when an employee is deleted
 type EmployeeDeletedEvent struct {
 	EmployeeID string `json:"employee_id"`
+}
+
+// Shift Events
+
+// ShiftCreatedEvent is published when a shift is created
+type ShiftCreatedEvent struct {
+	ShiftID    string    `json:"shift_id"`
+	EmployeeID string    `json:"employee_id"`
+	ShiftDate  time.Time `json:"shift_date"`
+	StartTime  string    `json:"start_time"`
+	EndTime    string    `json:"end_time"`
+	ShiftType  string    `json:"shift_type"`
+}
+
+// ShiftUpdatedEvent is published when a shift is updated
+type ShiftUpdatedEvent struct {
+	ShiftID    string         `json:"shift_id"`
+	EmployeeID string         `json:"employee_id"`
+	Fields     map[string]any `json:"fields"`
+}
+
+// ShiftDeletedEvent is published when a shift is deleted
+type ShiftDeletedEvent struct {
+	ShiftID    string `json:"shift_id"`
+	EmployeeID string `json:"employee_id"`
+}
+
+// Absence Events
+
+// AbsenceCreatedEvent is published when an absence is created
+type AbsenceCreatedEvent struct {
+	AbsenceID   string    `json:"absence_id"`
+	EmployeeID  string    `json:"employee_id"`
+	AbsenceType string    `json:"absence_type"`
+	StartDate   time.Time `json:"start_date"`
+	EndDate     time.Time `json:"end_date"`
+	Status      string    `json:"status"`
+}
+
+// AbsenceUpdatedEvent is published when an absence is updated
+type AbsenceUpdatedEvent struct {
+	AbsenceID  string         `json:"absence_id"`
+	EmployeeID string         `json:"employee_id"`
+	Fields     map[string]any `json:"fields"`
+}
+
+// AbsenceApprovedEvent is published when an absence is approved
+type AbsenceApprovedEvent struct {
+	AbsenceID  string `json:"absence_id"`
+	ReviewerID string `json:"reviewer_id"`
+}
+
+// AbsenceRejectedEvent is published when an absence is rejected
+type AbsenceRejectedEvent struct {
+	AbsenceID  string `json:"absence_id"`
+	ReviewerID string `json:"reviewer_id"`
+	Reason     string `json:"reason"`
+}
+
+// AbsenceDeletedEvent is published when an absence is deleted
+type AbsenceDeletedEvent struct {
+	AbsenceID string `json:"absence_id"`
+}
+
+// Time Tracking Events
+
+// TimeClockInEvent is published when an employee clocks in
+type TimeClockInEvent struct {
+	TimeEntryID  string    `json:"time_entry_id"`
+	EmployeeID   string    `json:"employee_id"`
+	ClockIn      time.Time `json:"clock_in"`
+	IsManual     bool      `json:"is_manual"`
+}
+
+// TimeClockOutEvent is published when an employee clocks out
+type TimeClockOutEvent struct {
+	TimeEntryID       string    `json:"time_entry_id"`
+	EmployeeID        string    `json:"employee_id"`
+	ClockIn           time.Time `json:"clock_in"`
+	ClockOut          time.Time `json:"clock_out"`
+	TotalWorkMinutes  int       `json:"total_work_minutes"`
+	TotalBreakMinutes int       `json:"total_break_minutes"`
+	IsManual          bool      `json:"is_manual"`
+}
+
+// TimeBreakStartEvent is published when an employee starts a break
+type TimeBreakStartEvent struct {
+	TimeBreakID string    `json:"time_break_id"`
+	TimeEntryID string    `json:"time_entry_id"`
+	EmployeeID  string    `json:"employee_id"`
+	StartTime   time.Time `json:"start_time"`
+}
+
+// TimeBreakEndEvent is published when an employee ends a break
+type TimeBreakEndEvent struct {
+	TimeBreakID   string    `json:"time_break_id"`
+	TimeEntryID   string    `json:"time_entry_id"`
+	EmployeeID    string    `json:"employee_id"`
+	StartTime     time.Time `json:"start_time"`
+	EndTime       time.Time `json:"end_time"`
+	DurationMins  int       `json:"duration_mins"`
 }
 
 // Inventory Events
