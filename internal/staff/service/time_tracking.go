@@ -257,14 +257,19 @@ func (s *TimeTrackingService) ManualClockIn(ctx context.Context, employeeID stri
 		return nil, errors.NotFound("employee")
 	}
 
-	// Check if already has an entry for this date
+	// Reject clock-in times in the future
+	if clockInTime.After(time.Now()) {
+		return nil, errors.BadRequest("clock in time cannot be in the future")
+	}
+
+	// Check if already has an active (uncompleted) entry
 	entryDate := time.Date(clockInTime.Year(), clockInTime.Month(), clockInTime.Day(), 0, 0, 0, 0, clockInTime.Location())
-	existingEntry, err := s.repo.GetEntryByEmployeeAndDate(ctx, employeeID, entryDate)
+	activeEntry, err := s.repo.GetActiveEntryByEmployeeID(ctx, employeeID)
 	if err != nil {
 		return nil, err
 	}
-	if existingEntry != nil {
-		return nil, errors.BadRequest("time entry already exists for this date")
+	if activeEntry != nil {
+		return nil, errors.BadRequest("employee already has an active time entry")
 	}
 
 	// Create new time entry
@@ -374,19 +379,51 @@ func (s *TimeTrackingService) GetAllStatuses(ctx context.Context) ([]*repository
 		return nil, err
 	}
 
-	// Enrich statuses with current entry (including breaks) for any employee with a today's entry
+	// Bulk-load all today's entries in one query
+	today := time.Now().Truncate(24 * time.Hour)
+	allEntries, err := s.repo.ListEntriesByDate(ctx, today)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("failed to bulk-load today's entries")
+		return statuses, nil // Return statuses without enrichment on failure
+	}
+
+	// Enrich each entry with breaks
+	for _, entry := range allEntries {
+		if err := s.enrichEntryWithBreaks(ctx, entry); err != nil {
+			s.logger.Error().Err(err).Str("entry_id", entry.ID).Msg("failed to enrich entry with breaks")
+		}
+	}
+
+	// Group entries by employee ID
+	entriesByEmployee := make(map[string][]*repository.TimeEntry)
+	for _, entry := range allEntries {
+		entriesByEmployee[entry.EmployeeID] = append(entriesByEmployee[entry.EmployeeID], entry)
+	}
+
+	// Assign TodayEntries and CurrentEntry for each status
 	for _, status := range statuses {
-		if status.TimeEntryID != nil {
-			entry, err := s.repo.GetEntryByID(ctx, *status.TimeEntryID)
-			if err != nil {
-				s.logger.Error().Err(err).Str("entry_id", *status.TimeEntryID).Msg("failed to get entry for status")
-				continue
+		entries := entriesByEmployee[status.EmployeeID]
+		if len(entries) == 0 {
+			continue
+		}
+		status.TodayEntries = entries
+
+		// CurrentEntry = the active entry (no ClockOut), or latest completed
+		var activeEntry *repository.TimeEntry
+		var latestCompleted *repository.TimeEntry
+		for _, e := range entries {
+			if e.ClockOut == nil {
+				activeEntry = e
+				break
 			}
-			// Enrich with breaks
-			if err := s.enrichEntryWithBreaks(ctx, entry); err != nil {
-				s.logger.Error().Err(err).Msg("failed to enrich entry with breaks")
+			if latestCompleted == nil || e.ClockIn.After(latestCompleted.ClockIn) {
+				latestCompleted = e
 			}
-			status.CurrentEntry = entry
+		}
+		if activeEntry != nil {
+			status.CurrentEntry = activeEntry
+		} else if latestCompleted != nil {
+			status.CurrentEntry = latestCompleted
 		}
 	}
 

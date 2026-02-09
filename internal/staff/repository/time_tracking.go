@@ -81,7 +81,8 @@ type EmployeeTimeStatus struct {
 	TodayBreakMinutes   int        `json:"today_break_minutes"`
 	WeekTotalMinutes    int        `json:"week_total_minutes"`
 	TargetWeeklyMinutes int        `json:"target_weekly_minutes"`
-	CurrentEntry        *TimeEntry `json:"current_entry,omitempty"`
+	CurrentEntry        *TimeEntry   `json:"current_entry,omitempty"`
+	TodayEntries        []*TimeEntry `json:"today_entries,omitempty"`
 }
 
 // TimePeriodSummary represents time tracking summary for a period
@@ -633,7 +634,7 @@ func (r *TimeTrackingRepository) GetAllEmployeeStatuses(ctx context.Context) ([]
 				WHERE employee_id = e.id
 					AND entry_date = CURRENT_DATE
 					AND deleted_at IS NULL
-				ORDER BY clock_in DESC
+				ORDER BY (clock_out IS NOT NULL), clock_in DESC
 				LIMIT 1
 			) te ON true
 			LEFT JOIN time_breaks tb ON te.id = tb.time_entry_id AND tb.end_time IS NULL
