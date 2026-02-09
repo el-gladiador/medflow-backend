@@ -223,6 +223,43 @@ func (r *EmployeeRepository) GetByID(ctx context.Context, id string) (*Employee,
 	return &emp, nil
 }
 
+// GetByUserID gets an employee by their linked user ID
+// TENANT-ISOLATED: Queries only the tenant's schema
+func (r *EmployeeRepository) GetByUserID(ctx context.Context, userID string) (*Employee, error) {
+	// Extract tenant schema from context
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
+		return nil, err // Fail-fast if tenant context missing
+	}
+
+	var emp Employee
+
+	// Execute query with tenant's search_path
+	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		query := `
+			SELECT id, user_id, employee_number, first_name, last_name, avatar_url,
+			       date_of_birth, gender, nationality,
+			       job_title, department, employment_type, hire_date,
+			       probation_end_date, termination_date, status, notes,
+			       email, phone, mobile, created_by, updated_by,
+			       created_at, updated_at
+			FROM employees
+			WHERE user_id = $1 AND deleted_at IS NULL
+		`
+
+		return r.db.GetContext(ctx, &emp, query, userID)
+	})
+
+	if err == sql.ErrNoRows {
+		return nil, errors.NotFound("employee")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &emp, nil
+}
+
 // List lists employees with pagination
 // TENANT-ISOLATED: Returns only employees from the tenant's schema
 func (r *EmployeeRepository) List(ctx context.Context, page, perPage int) ([]*Employee, int64, error) {
@@ -285,7 +322,8 @@ func (r *EmployeeRepository) Update(ctx context.Context, emp *Employee) error {
 				date_of_birth = $7, gender = $8, nationality = $9,
 				job_title = $10, department = $11, employment_type = $12, hire_date = $13,
 				probation_end_date = $14, termination_date = $15, status = $16, notes = $17,
-				email = $18, phone = $19, mobile = $20, updated_by = $21
+				email = $18, phone = $19, mobile = $20, updated_by = $21,
+				updated_at = NOW()
 			WHERE id = $1 AND deleted_at IS NULL
 		`
 
@@ -631,5 +669,85 @@ func (r *EmployeeRepository) NullifyUserReferences(ctx context.Context, userID s
 		query := `UPDATE employees SET user_id = NULL WHERE user_id = $1`
 		_, err := r.db.ExecContext(ctx, query, userID)
 		return err
+	})
+}
+
+// UpdateUserID atomically sets user_id for an employee
+// Returns error if employee already has a user_id set (to prevent accidental overwrites)
+// TENANT-ISOLATED: Updates only in the tenant's schema
+func (r *EmployeeRepository) UpdateUserID(ctx context.Context, employeeID, userID string) error {
+	// Extract tenant schema from context
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
+		return err // Fail-fast if tenant context missing
+	}
+
+	// Execute query with tenant's search_path
+	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		// Use conditional update: only update if user_id is currently NULL
+		// This prevents overwriting existing user_id links
+		query := `
+			UPDATE employees
+			SET user_id = $2, updated_at = NOW()
+			WHERE id = $1 AND deleted_at IS NULL AND user_id IS NULL
+		`
+
+		result, err := r.db.ExecContext(ctx, query, employeeID, userID)
+		if err != nil {
+			return err
+		}
+
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			// Either employee not found or already has user_id
+			// Check which case it is
+			var existingUserID *string
+			checkQuery := `SELECT user_id FROM employees WHERE id = $1 AND deleted_at IS NULL`
+			err := r.db.GetContext(ctx, &existingUserID, checkQuery, employeeID)
+			if err == sql.ErrNoRows {
+				return errors.NotFound("employee")
+			}
+			if err != nil {
+				return err
+			}
+			if existingUserID != nil {
+				return errors.Conflict("employee already has user credentials")
+			}
+			return errors.NotFound("employee")
+		}
+
+		return nil
+	})
+}
+
+// ClearUserID removes the user_id link from an employee
+// This is used when removing credentials from an employee (soft-deleting user but keeping employee)
+// TENANT-ISOLATED: Updates only in the tenant's schema
+func (r *EmployeeRepository) ClearUserID(ctx context.Context, employeeID string) error {
+	// Extract tenant schema from context
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
+		return err // Fail-fast if tenant context missing
+	}
+
+	// Execute query with tenant's search_path
+	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		query := `
+			UPDATE employees
+			SET user_id = NULL, updated_at = NOW()
+			WHERE id = $1 AND deleted_at IS NULL
+		`
+
+		result, err := r.db.ExecContext(ctx, query, employeeID)
+		if err != nil {
+			return err
+		}
+
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			return errors.NotFound("employee")
+		}
+
+		return nil
 	})
 }

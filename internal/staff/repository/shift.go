@@ -560,6 +560,59 @@ func (r *ShiftRepository) BulkCreateAssignments(ctx context.Context, shifts []*S
 	})
 }
 
+// ShiftWithTimes represents a shift with computed start/end times
+type ShiftWithTimes struct {
+	ShiftAssignment
+	ShiftStart time.Time
+	ShiftEnd   time.Time
+}
+
+// ListAssignmentsByEmployeeAndDateRange gets shifts with computed times for compliance checking
+// TENANT-ISOLATED: Queries only the tenant's schema
+func (r *ShiftRepository) ListAssignmentsByEmployeeAndDateRange(ctx context.Context, employeeID string, startDate, endDate time.Time) ([]*ShiftWithTimes, error) {
+	shifts, err := r.GetEmployeeShiftsForDateRange(ctx, employeeID, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*ShiftWithTimes, 0, len(shifts))
+	for _, shift := range shifts {
+		// Parse time strings to create full timestamps
+		startParsed, err := time.Parse("15:04:05", shift.StartTime)
+		if err != nil {
+			continue
+		}
+		endParsed, err := time.Parse("15:04:05", shift.EndTime)
+		if err != nil {
+			continue
+		}
+
+		shiftStart := time.Date(
+			shift.ShiftDate.Year(), shift.ShiftDate.Month(), shift.ShiftDate.Day(),
+			startParsed.Hour(), startParsed.Minute(), startParsed.Second(), 0,
+			shift.ShiftDate.Location(),
+		)
+		shiftEnd := time.Date(
+			shift.ShiftDate.Year(), shift.ShiftDate.Month(), shift.ShiftDate.Day(),
+			endParsed.Hour(), endParsed.Minute(), endParsed.Second(), 0,
+			shift.ShiftDate.Location(),
+		)
+
+		// Handle overnight shifts
+		if shiftEnd.Before(shiftStart) {
+			shiftEnd = shiftEnd.AddDate(0, 0, 1)
+		}
+
+		result = append(result, &ShiftWithTimes{
+			ShiftAssignment: *shift,
+			ShiftStart:      shiftStart,
+			ShiftEnd:        shiftEnd,
+		})
+	}
+
+	return result, nil
+}
+
 // CheckForConflicts checks if a shift assignment conflicts with existing shifts or violates rest period
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *ShiftRepository) CheckForConflicts(ctx context.Context, employeeID string, shiftDate time.Time, startTime, endTime string, excludeID *string) (bool, string, error) {

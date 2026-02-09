@@ -13,22 +13,38 @@ import (
 
 // TimeTrackingService handles time tracking business logic
 type TimeTrackingService struct {
-	repo      *repository.TimeTrackingRepository
-	publisher *events.StaffEventPublisher
-	logger    *logger.Logger
+	repo       *repository.TimeTrackingRepository
+	compliance *ComplianceService
+	publisher  *events.StaffEventPublisher
+	logger     *logger.Logger
 }
 
 // NewTimeTrackingService creates a new time tracking service
 func NewTimeTrackingService(
 	repo *repository.TimeTrackingRepository,
+	compliance *ComplianceService,
 	publisher *events.StaffEventPublisher,
 	log *logger.Logger,
 ) *TimeTrackingService {
 	return &TimeTrackingService{
-		repo:      repo,
-		publisher: publisher,
-		logger:    log,
+		repo:       repo,
+		compliance: compliance,
+		publisher:  publisher,
+		logger:     log,
 	}
+}
+
+// enrichEntryWithBreaks fetches breaks for a time entry and attaches them
+func (s *TimeTrackingService) enrichEntryWithBreaks(ctx context.Context, entry *repository.TimeEntry) error {
+	if entry == nil {
+		return nil
+	}
+	breaks, err := s.repo.ListBreaksForEntry(ctx, entry.ID)
+	if err != nil {
+		return err
+	}
+	entry.Breaks = breaks
+	return nil
 }
 
 // ClockIn clocks in an employee
@@ -63,6 +79,9 @@ func (s *TimeTrackingService) ClockIn(ctx context.Context, employeeID string) (*
 	if err := s.repo.CreateEntry(ctx, entry); err != nil {
 		return nil, err
 	}
+
+	// Initialize empty breaks slice for new entry
+	entry.Breaks = []*repository.TimeBreak{}
 
 	// Publish event
 	s.publisher.PublishTimeClockIn(ctx, entry)
@@ -116,6 +135,19 @@ func (s *TimeTrackingService) ClockOut(ctx context.Context, employeeID string) (
 		return nil, err
 	}
 
+	// Auto-audit: record any ArbZG violations
+	if s.compliance != nil {
+		if err := s.compliance.RecordClockOutViolations(ctx, employeeID); err != nil {
+			s.logger.Error().Err(err).Str("employee_id", employeeID).Msg("failed to record clock-out violations")
+			// Don't fail the clock-out - audit is best-effort
+		}
+	}
+
+	// Enrich with breaks
+	if err := s.enrichEntryWithBreaks(ctx, entry); err != nil {
+		s.logger.Error().Err(err).Msg("failed to enrich entry with breaks")
+	}
+
 	// Publish event
 	s.publisher.PublishTimeClockOut(ctx, entry)
 
@@ -161,6 +193,11 @@ func (s *TimeTrackingService) StartBreak(ctx context.Context, employeeID string)
 		return nil, err
 	}
 
+	// Enrich with breaks
+	if err := s.enrichEntryWithBreaks(ctx, entry); err != nil {
+		s.logger.Error().Err(err).Msg("failed to enrich entry with breaks")
+	}
+
 	return entry, nil
 }
 
@@ -201,6 +238,11 @@ func (s *TimeTrackingService) EndBreak(ctx context.Context, employeeID string) (
 		return nil, err
 	}
 
+	// Enrich with breaks
+	if err := s.enrichEntryWithBreaks(ctx, entry); err != nil {
+		s.logger.Error().Err(err).Msg("failed to enrich entry with breaks")
+	}
+
 	return entry, nil
 }
 
@@ -237,6 +279,9 @@ func (s *TimeTrackingService) ManualClockIn(ctx context.Context, employeeID stri
 	if err := s.repo.CreateEntry(ctx, entry); err != nil {
 		return nil, err
 	}
+
+	// Initialize empty breaks slice
+	entry.Breaks = []*repository.TimeBreak{}
 
 	// Publish event
 	s.publisher.PublishTimeClockIn(ctx, entry)
@@ -324,7 +369,28 @@ func (s *TimeTrackingService) GetEmployeeCorrections(ctx context.Context, employ
 
 // GetAllStatuses gets time tracking status for all employees
 func (s *TimeTrackingService) GetAllStatuses(ctx context.Context) ([]*repository.EmployeeTimeStatus, error) {
-	return s.repo.GetAllEmployeeStatuses(ctx)
+	statuses, err := s.repo.GetAllEmployeeStatuses(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Enrich statuses with current entry (including breaks) for any employee with a today's entry
+	for _, status := range statuses {
+		if status.TimeEntryID != nil {
+			entry, err := s.repo.GetEntryByID(ctx, *status.TimeEntryID)
+			if err != nil {
+				s.logger.Error().Err(err).Str("entry_id", *status.TimeEntryID).Msg("failed to get entry for status")
+				continue
+			}
+			// Enrich with breaks
+			if err := s.enrichEntryWithBreaks(ctx, entry); err != nil {
+				s.logger.Error().Err(err).Msg("failed to enrich entry with breaks")
+			}
+			status.CurrentEntry = entry
+		}
+	}
+
+	return statuses, nil
 }
 
 // GetEmployeeHistory gets time tracking history for an employee
@@ -341,17 +407,37 @@ func (s *TimeTrackingService) GetEmployeeHistory(ctx context.Context, employeeID
 	return s.repo.GetEmployeeTimeSummary(ctx, employeeID, startDate, endDate)
 }
 
-// GetEntriesByDate gets all time entries for a specific date
+// GetEntriesByDate gets all time entries for a specific date, enriched with breaks
 func (s *TimeTrackingService) GetEntriesByDate(ctx context.Context, date time.Time) ([]*repository.TimeEntry, error) {
-	return s.repo.ListEntriesByDate(ctx, date)
+	entries, err := s.repo.ListEntriesByDate(ctx, date)
+	if err != nil {
+		return nil, err
+	}
+
+	// Enrich each entry with its breaks
+	for _, entry := range entries {
+		if err := s.enrichEntryWithBreaks(ctx, entry); err != nil {
+			s.logger.Error().Err(err).Str("entry_id", entry.ID).Msg("failed to enrich entry with breaks")
+		}
+	}
+
+	return entries, nil
 }
 
 // GetEntryByID gets a time entry by ID
 func (s *TimeTrackingService) GetEntryByID(ctx context.Context, id string) (*repository.TimeEntry, error) {
-	return s.repo.GetEntryByID(ctx, id)
+	entry, err := s.repo.GetEntryByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.enrichEntryWithBreaks(ctx, entry); err != nil {
+		s.logger.Error().Err(err).Msg("failed to enrich entry with breaks")
+	}
+	return entry, nil
 }
 
 // UpdateEntry updates a time entry (for partial updates)
+// Supports "clock_out_clear": true to clear the clock-out time
 func (s *TimeTrackingService) UpdateEntry(ctx context.Context, id string, updates map[string]interface{}, userID string) (*repository.TimeEntry, error) {
 	// Get existing entry
 	entry, err := s.repo.GetEntryByID(ctx, id)
@@ -363,7 +449,12 @@ func (s *TimeTrackingService) UpdateEntry(ctx context.Context, id string, update
 	if clockIn, ok := updates["clock_in"].(time.Time); ok {
 		entry.ClockIn = clockIn
 	}
-	if clockOut, ok := updates["clock_out"].(time.Time); ok {
+	if _, ok := updates["clock_out_clear"]; ok {
+		// Explicitly clear clock-out: set to nil, zero out totals
+		entry.ClockOut = nil
+		entry.TotalWorkMinutes = 0
+		entry.TotalBreakMinutes = 0
+	} else if clockOut, ok := updates["clock_out"].(time.Time); ok {
 		entry.ClockOut = &clockOut
 	}
 	if notes, ok := updates["notes"].(string); ok {
@@ -390,6 +481,72 @@ func (s *TimeTrackingService) UpdateEntry(ctx context.Context, id string, update
 
 	if err := s.repo.UpdateEntry(ctx, entry); err != nil {
 		return nil, err
+	}
+
+	// Enrich with breaks
+	if err := s.enrichEntryWithBreaks(ctx, entry); err != nil {
+		s.logger.Error().Err(err).Msg("failed to enrich entry with breaks")
+	}
+
+	return entry, nil
+}
+
+// BreakInput represents a break in a replace-breaks request
+type BreakInput struct {
+	ID        string     `json:"id"`
+	StartTime time.Time  `json:"start_time"`
+	EndTime   *time.Time `json:"end_time"`
+}
+
+// ReplaceBreaksForEntry deletes all existing breaks for an entry and creates new ones,
+// then recalculates totals on the parent entry.
+func (s *TimeTrackingService) ReplaceBreaksForEntry(ctx context.Context, entryID string, breaks []BreakInput, userID string) (*repository.TimeEntry, error) {
+	// Get existing entry
+	entry, err := s.repo.GetEntryByID(ctx, entryID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Delete all existing breaks
+	if err := s.repo.DeleteBreaksForEntry(ctx, entryID); err != nil {
+		return nil, fmt.Errorf("failed to delete existing breaks: %w", err)
+	}
+
+	// Create new breaks
+	for _, b := range breaks {
+		brk := &repository.TimeBreak{
+			TimeEntryID: entryID,
+			StartTime:   b.StartTime,
+			EndTime:     b.EndTime,
+		}
+		if err := s.repo.CreateBreak(ctx, brk); err != nil {
+			return nil, fmt.Errorf("failed to create break: %w", err)
+		}
+	}
+
+	// Recalculate totals
+	totalBreakMinutes, err := s.repo.CalculateTotalBreakMinutes(ctx, entryID)
+	if err != nil {
+		return nil, err
+	}
+	entry.TotalBreakMinutes = totalBreakMinutes
+
+	if entry.ClockOut != nil {
+		totalMinutes := int(entry.ClockOut.Sub(entry.ClockIn).Minutes())
+		entry.TotalWorkMinutes = totalMinutes - totalBreakMinutes
+		if entry.TotalWorkMinutes < 0 {
+			entry.TotalWorkMinutes = 0
+		}
+	}
+
+	entry.UpdatedBy = &userID
+	if err := s.repo.UpdateEntry(ctx, entry); err != nil {
+		return nil, err
+	}
+
+	// Enrich with the new breaks
+	if err := s.enrichEntryWithBreaks(ctx, entry); err != nil {
+		s.logger.Error().Err(err).Msg("failed to enrich entry with breaks")
 	}
 
 	return entry, nil
@@ -428,7 +585,8 @@ func (s *TimeTrackingService) GetEmployeeStatus(ctx context.Context, employeeID 
 	}
 
 	status := &repository.EmployeeTimeStatus{
-		EmployeeID: employeeID,
+		EmployeeID:          employeeID,
+		TargetWeeklyMinutes: 2400, // 40h/week default
 	}
 
 	if entry == nil {
@@ -451,14 +609,15 @@ func (s *TimeTrackingService) GetEmployeeStatus(ctx context.Context, employeeID 
 		}
 	}
 
-	// Get today's minutes
+	// Get today's minutes (work + break)
 	todayEntries, err := s.repo.ListEntriesForEmployee(ctx, employeeID,
 		time.Now().Truncate(24*time.Hour), time.Now())
 	if err != nil {
 		return nil, err
 	}
 	for _, e := range todayEntries {
-		status.TodayMinutes += e.TotalWorkMinutes
+		status.TodayWorkMinutes += e.TotalWorkMinutes
+		status.TodayBreakMinutes += e.TotalBreakMinutes
 	}
 
 	// Get week minutes
@@ -466,7 +625,7 @@ func (s *TimeTrackingService) GetEmployeeStatus(ctx context.Context, employeeID 
 	if err != nil {
 		return nil, err
 	}
-	status.WeekMinutes = weekMinutes
+	status.WeekTotalMinutes = weekMinutes
 
 	return status, nil
 }

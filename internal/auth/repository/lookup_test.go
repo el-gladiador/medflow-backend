@@ -39,6 +39,7 @@ func createLookupTable(ctx context.Context) error {
 	_, err := suite.RawDB.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS public.user_tenant_lookup (
 			email VARCHAR(255) PRIMARY KEY,
+			username VARCHAR(100),
 			user_id UUID NOT NULL,
 			tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
 			tenant_slug VARCHAR(100) NOT NULL,
@@ -49,6 +50,11 @@ func createLookupTable(ctx context.Context) error {
 
 		CREATE INDEX IF NOT EXISTS idx_user_tenant_lookup_user_id ON public.user_tenant_lookup(user_id);
 		CREATE INDEX IF NOT EXISTS idx_user_tenant_lookup_tenant_id ON public.user_tenant_lookup(tenant_id);
+		CREATE INDEX IF NOT EXISTS idx_user_tenant_lookup_username ON public.user_tenant_lookup(username)
+			WHERE username IS NOT NULL;
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_user_tenant_lookup_username_tenant_unique
+			ON public.user_tenant_lookup(username, tenant_slug)
+			WHERE username IS NOT NULL;
 	`)
 	return err
 }
@@ -356,4 +362,273 @@ func TestUserTenantLookupRepository_CascadeDelete(t *testing.T) {
 	exists, err = repo.Exists(ctx, email)
 	require.NoError(t, err)
 	assert.False(t, exists, "lookup entry should be deleted when tenant is deleted (CASCADE)")
+}
+
+// ============================================================================
+// USERNAME + TENANT SLUG TESTS (Subdomain-based multi-tenancy)
+// ============================================================================
+
+func addUsernameColumnIfMissing(ctx context.Context, t *testing.T) {
+	// Add username column if it doesn't exist (for test isolation)
+	_, _ = suite.RawDB.ExecContext(ctx, `
+		ALTER TABLE public.user_tenant_lookup
+		ADD COLUMN IF NOT EXISTS username VARCHAR(100);
+
+		CREATE INDEX IF NOT EXISTS idx_user_tenant_lookup_username
+		ON public.user_tenant_lookup(username)
+		WHERE username IS NOT NULL;
+	`)
+}
+
+func TestUserTenantLookupRepository_GetByUsername(t *testing.T) {
+	ctx := context.Background()
+	cleanupLookupTable(ctx, t)
+	addUsernameColumnIfMissing(ctx, t)
+
+	tenant := suite.SetupUserTenant(t, ctx, "lookup-test-username")
+	repo := repository.NewUserTenantLookupRepository(suite.DB)
+
+	username := "testuser"
+	lookup := &repository.UserTenantLookup{
+		Email:        "testuser@praxis.de",
+		Username:     &username,
+		UserID:       uuid.New().String(),
+		TenantID:     tenant.ID,
+		TenantSlug:   tenant.Slug,
+		TenantSchema: tenant.SchemaName,
+	}
+	err := repo.Upsert(ctx, lookup)
+	require.NoError(t, err)
+
+	t.Run("returns lookup for existing username", func(t *testing.T) {
+		result, err := repo.GetByUsername(ctx, username)
+		require.NoError(t, err)
+		assert.Equal(t, lookup.Email, result.Email)
+		assert.Equal(t, username, *result.Username)
+		assert.Equal(t, lookup.TenantSlug, result.TenantSlug)
+	})
+
+	t.Run("returns error for non-existent username", func(t *testing.T) {
+		_, err := repo.GetByUsername(ctx, "nonexistent")
+		require.Error(t, err)
+	})
+}
+
+func TestUserTenantLookupRepository_GetByUsernameAndSlug(t *testing.T) {
+	ctx := context.Background()
+	cleanupLookupTable(ctx, t)
+	addUsernameColumnIfMissing(ctx, t)
+
+	// Create two tenants
+	tenant1 := suite.SetupUserTenant(t, ctx, "clinic-alpha")
+	tenant2 := suite.SetupUserTenant(t, ctx, "clinic-beta")
+	repo := repository.NewUserTenantLookupRepository(suite.DB)
+
+	// Same username in both tenants (common scenario: "admin")
+	username := "admin"
+
+	// Admin user in tenant1
+	user1ID := uuid.New().String()
+	err := repo.Upsert(ctx, &repository.UserTenantLookup{
+		Email:        "admin@clinic-alpha.de",
+		Username:     &username,
+		UserID:       user1ID,
+		TenantID:     tenant1.ID,
+		TenantSlug:   tenant1.Slug,
+		TenantSchema: tenant1.SchemaName,
+	})
+	require.NoError(t, err)
+
+	// Admin user in tenant2 (different user, same username)
+	user2ID := uuid.New().String()
+	err = repo.Upsert(ctx, &repository.UserTenantLookup{
+		Email:        "admin@clinic-beta.de",
+		Username:     &username,
+		UserID:       user2ID,
+		TenantID:     tenant2.ID,
+		TenantSlug:   tenant2.Slug,
+		TenantSchema: tenant2.SchemaName,
+	})
+	require.NoError(t, err)
+
+	t.Run("returns correct user for username + tenant1", func(t *testing.T) {
+		result, err := repo.GetByUsernameAndSlug(ctx, username, tenant1.Slug)
+		require.NoError(t, err)
+		assert.Equal(t, user1ID, result.UserID)
+		assert.Equal(t, "admin@clinic-alpha.de", result.Email)
+		assert.Equal(t, tenant1.Slug, result.TenantSlug)
+	})
+
+	t.Run("returns correct user for username + tenant2", func(t *testing.T) {
+		result, err := repo.GetByUsernameAndSlug(ctx, username, tenant2.Slug)
+		require.NoError(t, err)
+		assert.Equal(t, user2ID, result.UserID)
+		assert.Equal(t, "admin@clinic-beta.de", result.Email)
+		assert.Equal(t, tenant2.Slug, result.TenantSlug)
+	})
+
+	t.Run("returns error for non-existent username", func(t *testing.T) {
+		_, err := repo.GetByUsernameAndSlug(ctx, "nonexistent", tenant1.Slug)
+		require.Error(t, err)
+	})
+
+	t.Run("returns error for non-existent tenant slug", func(t *testing.T) {
+		_, err := repo.GetByUsernameAndSlug(ctx, username, "nonexistent-tenant")
+		require.Error(t, err)
+	})
+
+	t.Run("returns error for valid username but wrong tenant", func(t *testing.T) {
+		// Create a user that only exists in tenant1
+		uniqueUsername := "uniqueuser"
+		err := repo.Upsert(ctx, &repository.UserTenantLookup{
+			Email:        "unique@clinic-alpha.de",
+			Username:     &uniqueUsername,
+			UserID:       uuid.New().String(),
+			TenantID:     tenant1.ID,
+			TenantSlug:   tenant1.Slug,
+			TenantSchema: tenant1.SchemaName,
+		})
+		require.NoError(t, err)
+
+		// Try to find this user in tenant2 (should fail)
+		_, err = repo.GetByUsernameAndSlug(ctx, uniqueUsername, tenant2.Slug)
+		require.Error(t, err, "should not find user in wrong tenant")
+	})
+}
+
+func TestUserTenantLookupRepository_UsernameUpsert(t *testing.T) {
+	ctx := context.Background()
+	cleanupLookupTable(ctx, t)
+	addUsernameColumnIfMissing(ctx, t)
+
+	tenant := suite.SetupUserTenant(t, ctx, "lookup-test-username-upsert")
+	repo := repository.NewUserTenantLookupRepository(suite.DB)
+
+	t.Run("inserts lookup entry with username", func(t *testing.T) {
+		username := "newuser"
+		lookup := &repository.UserTenantLookup{
+			Email:        "newuser@praxis.de",
+			Username:     &username,
+			UserID:       uuid.New().String(),
+			TenantID:     tenant.ID,
+			TenantSlug:   tenant.Slug,
+			TenantSchema: tenant.SchemaName,
+		}
+
+		err := repo.Upsert(ctx, lookup)
+		require.NoError(t, err)
+
+		result, err := repo.GetByEmail(ctx, lookup.Email)
+		require.NoError(t, err)
+		require.NotNil(t, result.Username)
+		assert.Equal(t, username, *result.Username)
+	})
+
+	t.Run("updates username on email conflict", func(t *testing.T) {
+		email := "updateusername@praxis.de"
+		oldUsername := "oldname"
+		newUsername := "newname"
+
+		// Insert with old username
+		err := repo.Upsert(ctx, &repository.UserTenantLookup{
+			Email:        email,
+			Username:     &oldUsername,
+			UserID:       uuid.New().String(),
+			TenantID:     tenant.ID,
+			TenantSlug:   tenant.Slug,
+			TenantSchema: tenant.SchemaName,
+		})
+		require.NoError(t, err)
+
+		// Update with new username
+		err = repo.Upsert(ctx, &repository.UserTenantLookup{
+			Email:        email,
+			Username:     &newUsername,
+			UserID:       uuid.New().String(),
+			TenantID:     tenant.ID,
+			TenantSlug:   tenant.Slug,
+			TenantSchema: tenant.SchemaName,
+		})
+		require.NoError(t, err)
+
+		result, err := repo.GetByEmail(ctx, email)
+		require.NoError(t, err)
+		require.NotNil(t, result.Username)
+		assert.Equal(t, newUsername, *result.Username)
+	})
+
+	t.Run("allows null username", func(t *testing.T) {
+		lookup := &repository.UserTenantLookup{
+			Email:        "nousername@praxis.de",
+			Username:     nil,
+			UserID:       uuid.New().String(),
+			TenantID:     tenant.ID,
+			TenantSlug:   tenant.Slug,
+			TenantSchema: tenant.SchemaName,
+		}
+
+		err := repo.Upsert(ctx, lookup)
+		require.NoError(t, err)
+
+		result, err := repo.GetByEmail(ctx, lookup.Email)
+		require.NoError(t, err)
+		assert.Nil(t, result.Username)
+	})
+}
+
+func TestUserTenantLookupRepository_TenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	cleanupLookupTable(ctx, t)
+	addUsernameColumnIfMissing(ctx, t)
+
+	// Create three tenants to test isolation
+	tenantA := suite.SetupUserTenant(t, ctx, "isolation-tenant-a")
+	tenantB := suite.SetupUserTenant(t, ctx, "isolation-tenant-b")
+	tenantC := suite.SetupUserTenant(t, ctx, "isolation-tenant-c")
+	repo := repository.NewUserTenantLookupRepository(suite.DB)
+
+	// Create same username "admin" in all three tenants
+	adminUsername := "admin"
+	var userIDs = make(map[string]string)
+
+	for i, tenant := range []struct {
+		tenant *testutil.TestTenant
+		email  string
+	}{
+		{tenantA, "admin@tenant-a.de"},
+		{tenantB, "admin@tenant-b.de"},
+		{tenantC, "admin@tenant-c.de"},
+	} {
+		userID := uuid.New().String()
+		userIDs[tenant.tenant.Slug] = userID
+
+		err := repo.Upsert(ctx, &repository.UserTenantLookup{
+			Email:        tenant.email,
+			Username:     &adminUsername,
+			UserID:       userID,
+			TenantID:     tenant.tenant.ID,
+			TenantSlug:   tenant.tenant.Slug,
+			TenantSchema: tenant.tenant.SchemaName,
+		})
+		require.NoError(t, err, "failed to create user %d", i)
+	}
+
+	t.Run("each tenant returns its own admin user", func(t *testing.T) {
+		for _, tenant := range []*testutil.TestTenant{tenantA, tenantB, tenantC} {
+			result, err := repo.GetByUsernameAndSlug(ctx, adminUsername, tenant.Slug)
+			require.NoError(t, err)
+			assert.Equal(t, userIDs[tenant.Slug], result.UserID,
+				"tenant %s should return its own admin user", tenant.Slug)
+		}
+	})
+
+	t.Run("cross-tenant access fails", func(t *testing.T) {
+		// Try to access tenant A's admin via tenant B's slug - should fail
+		result, err := repo.GetByUsernameAndSlug(ctx, adminUsername, tenantA.Slug)
+		require.NoError(t, err)
+
+		// The result should be tenant A's user, not tenant B's
+		assert.NotEqual(t, userIDs[tenantB.Slug], result.UserID)
+		assert.Equal(t, userIDs[tenantA.Slug], result.UserID)
+	})
 }

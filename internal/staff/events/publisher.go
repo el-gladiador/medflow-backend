@@ -63,6 +63,48 @@ func (p *StaffEventPublisher) PublishEmployeeDeleted(ctx context.Context, employ
 	}
 }
 
+// PublishEmployeeCredentialsAdded publishes an event when credentials are added to an employee
+func (p *StaffEventPublisher) PublishEmployeeCredentialsAdded(ctx context.Context, employeeID, userID, email, roleName, addedBy, tenantID, tenantSlug, tenantSchema string) {
+	data := messaging.EmployeeCredentialsAddedEvent{
+		EmployeeID:   employeeID,
+		UserID:       userID,
+		Email:        email,
+		RoleName:     roleName,
+		AddedBy:      addedBy,
+		TenantID:     tenantID,
+		TenantSlug:   tenantSlug,
+		TenantSchema: tenantSchema,
+	}
+
+	if err := p.publisher.Publish(ctx, messaging.EventEmployeeCredentialsAdded, data); err != nil {
+		p.logger.Error().Err(err).
+			Str("employee_id", employeeID).
+			Str("user_id", userID).
+			Msg("failed to publish employee credentials added event")
+	}
+}
+
+// PublishEmployeeCredentialsRemoved publishes an event when credentials are removed from an employee
+func (p *StaffEventPublisher) PublishEmployeeCredentialsRemoved(ctx context.Context, employeeID, userID, email, removedBy, reason, tenantID, tenantSlug, tenantSchema string) {
+	data := messaging.EmployeeCredentialsRemovedEvent{
+		EmployeeID:   employeeID,
+		UserID:       userID,
+		Email:        email,
+		RemovedBy:    removedBy,
+		Reason:       reason,
+		TenantID:     tenantID,
+		TenantSlug:   tenantSlug,
+		TenantSchema: tenantSchema,
+	}
+
+	if err := p.publisher.Publish(ctx, messaging.EventEmployeeCredentialsRemoved, data); err != nil {
+		p.logger.Error().Err(err).
+			Str("employee_id", employeeID).
+			Str("user_id", userID).
+			Msg("failed to publish employee credentials removed event")
+	}
+}
+
 // ============================================================================
 // SHIFT EVENTS
 // ============================================================================

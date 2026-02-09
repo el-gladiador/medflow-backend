@@ -42,6 +42,7 @@ func createLookupTable(ctx context.Context) error {
 	_, err := suite.RawDB.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS public.user_tenant_lookup (
 			email VARCHAR(255) PRIMARY KEY,
+			username VARCHAR(100),
 			user_id UUID NOT NULL,
 			tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
 			tenant_slug VARCHAR(100) NOT NULL,
@@ -52,6 +53,11 @@ func createLookupTable(ctx context.Context) error {
 
 		CREATE INDEX IF NOT EXISTS idx_user_tenant_lookup_user_id ON public.user_tenant_lookup(user_id);
 		CREATE INDEX IF NOT EXISTS idx_user_tenant_lookup_tenant_id ON public.user_tenant_lookup(tenant_id);
+		CREATE INDEX IF NOT EXISTS idx_user_tenant_lookup_username ON public.user_tenant_lookup(username)
+			WHERE username IS NOT NULL;
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_user_tenant_lookup_username_tenant_unique
+			ON public.user_tenant_lookup(username, tenant_slug)
+			WHERE username IS NOT NULL;
 	`)
 	return err
 }

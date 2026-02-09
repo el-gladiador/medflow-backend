@@ -11,6 +11,7 @@ import (
 // UserTenantLookup represents a user-to-tenant mapping for fast login resolution
 type UserTenantLookup struct {
 	Email        string    `db:"email"`
+	Username     *string   `db:"username"` // Optional username for username-based login
 	UserID       string    `db:"user_id"`
 	TenantID     string    `db:"tenant_id"`
 	TenantSlug   string    `db:"tenant_slug"`
@@ -34,7 +35,7 @@ func NewUserTenantLookupRepository(db *database.DB) *UserTenantLookupRepository 
 func (r *UserTenantLookupRepository) GetByEmail(ctx context.Context, email string) (*UserTenantLookup, error) {
 	var lookup UserTenantLookup
 	query := `
-		SELECT email, user_id, tenant_id, tenant_slug, tenant_schema, created_at, updated_at
+		SELECT email, username, user_id, tenant_id, tenant_slug, tenant_schema, created_at, updated_at
 		FROM public.user_tenant_lookup
 		WHERE email = $1
 	`
@@ -46,12 +47,50 @@ func (r *UserTenantLookupRepository) GetByEmail(ctx context.Context, email strin
 	return &lookup, nil
 }
 
+// GetByUsername retrieves tenant information for a user by username
+// Used during login when user enters username instead of email
+// NOTE: This method is DEPRECATED for multi-tenant environments.
+// Use GetByUsernameAndSlug instead, which requires tenant context from subdomain.
+func (r *UserTenantLookupRepository) GetByUsername(ctx context.Context, username string) (*UserTenantLookup, error) {
+	var lookup UserTenantLookup
+	query := `
+		SELECT email, username, user_id, tenant_id, tenant_slug, tenant_schema, created_at, updated_at
+		FROM public.user_tenant_lookup
+		WHERE username = $1
+	`
+
+	if err := r.db.GetContext(ctx, &lookup, query, username); err != nil {
+		return nil, err
+	}
+
+	return &lookup, nil
+}
+
+// GetByUsernameAndSlug retrieves tenant information for a user by username AND tenant slug
+// This is the primary lookup for subdomain-based username login.
+// Username is only unique within a tenant, so we need both to identify the user.
+// Example: "admin" user in "demo-clinic" tenant when accessing demo-clinic.medflow.de
+func (r *UserTenantLookupRepository) GetByUsernameAndSlug(ctx context.Context, username, tenantSlug string) (*UserTenantLookup, error) {
+	var lookup UserTenantLookup
+	query := `
+		SELECT email, username, user_id, tenant_id, tenant_slug, tenant_schema, created_at, updated_at
+		FROM public.user_tenant_lookup
+		WHERE username = $1 AND tenant_slug = $2
+	`
+
+	if err := r.db.GetContext(ctx, &lookup, query, username, tenantSlug); err != nil {
+		return nil, err
+	}
+
+	return &lookup, nil
+}
+
 // GetByUserID retrieves all tenant mappings for a user ID
 // Useful for reverse lookups when deleting a user
 func (r *UserTenantLookupRepository) GetByUserID(ctx context.Context, userID string) ([]*UserTenantLookup, error) {
 	var lookups []*UserTenantLookup
 	query := `
-		SELECT email, user_id, tenant_id, tenant_slug, tenant_schema, created_at, updated_at
+		SELECT email, username, user_id, tenant_id, tenant_slug, tenant_schema, created_at, updated_at
 		FROM public.user_tenant_lookup
 		WHERE user_id = $1
 	`
@@ -64,12 +103,13 @@ func (r *UserTenantLookupRepository) GetByUserID(ctx context.Context, userID str
 }
 
 // Upsert inserts or updates a user-tenant mapping
-// Used when a user is created or when their email changes
+// Used when a user is created or when their email/username changes
 func (r *UserTenantLookupRepository) Upsert(ctx context.Context, lookup *UserTenantLookup) error {
 	query := `
-		INSERT INTO public.user_tenant_lookup (email, user_id, tenant_id, tenant_slug, tenant_schema)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO public.user_tenant_lookup (email, username, user_id, tenant_id, tenant_slug, tenant_schema)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (email) DO UPDATE SET
+			username = EXCLUDED.username,
 			user_id = EXCLUDED.user_id,
 			tenant_id = EXCLUDED.tenant_id,
 			tenant_slug = EXCLUDED.tenant_slug,
@@ -79,6 +119,7 @@ func (r *UserTenantLookupRepository) Upsert(ctx context.Context, lookup *UserTen
 
 	_, err := r.db.ExecContext(ctx, query,
 		lookup.Email,
+		lookup.Username,
 		lookup.UserID,
 		lookup.TenantID,
 		lookup.TenantSlug,

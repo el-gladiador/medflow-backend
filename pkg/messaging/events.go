@@ -16,9 +16,11 @@ const (
 	EventUserPermissionChanged = "user.permission.changed"
 
 	// Staff events
-	EventEmployeeCreated = "staff.employee.created"
-	EventEmployeeUpdated = "staff.employee.updated"
-	EventEmployeeDeleted = "staff.employee.deleted"
+	EventEmployeeCreated            = "staff.employee.created"
+	EventEmployeeUpdated            = "staff.employee.updated"
+	EventEmployeeDeleted            = "staff.employee.deleted"
+	EventEmployeeCredentialsAdded   = "staff.employee.credentials.added"
+	EventEmployeeCredentialsRemoved = "staff.employee.credentials.removed"
 
 	// Shift events
 	EventShiftCreated = "staff.shift.created"
@@ -91,11 +93,12 @@ func (e *Event) UnmarshalData(v interface{}) error {
 
 // UserCreatedEvent is published when a user is created
 type UserCreatedEvent struct {
-	UserID    string `json:"user_id"`
-	Email     string `json:"email"`
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
-	RoleName  string `json:"role_name"`
+	UserID    string  `json:"user_id"`
+	Email     string  `json:"email"`
+	Username  *string `json:"username,omitempty"` // Optional username for subdomain login
+	FirstName string  `json:"first_name"`
+	LastName  string  `json:"last_name"`
+	RoleName  string  `json:"role_name"`
 
 	// Tenant context (required for user-tenant lookup table)
 	TenantID     string `json:"tenant_id"`
@@ -166,6 +169,30 @@ type EmployeeUpdatedEvent struct {
 // EmployeeDeletedEvent is published when an employee is deleted
 type EmployeeDeletedEvent struct {
 	EmployeeID string `json:"employee_id"`
+}
+
+// EmployeeCredentialsAddedEvent is published when user credentials are added to an employee
+type EmployeeCredentialsAddedEvent struct {
+	EmployeeID   string `json:"employee_id"`
+	UserID       string `json:"user_id"`
+	Email        string `json:"email"`
+	RoleName     string `json:"role_name"`
+	AddedBy      string `json:"added_by"` // Actor who added credentials
+	TenantID     string `json:"tenant_id"`
+	TenantSlug   string `json:"tenant_slug"`
+	TenantSchema string `json:"tenant_schema"`
+}
+
+// EmployeeCredentialsRemovedEvent is published when user credentials are removed from an employee
+type EmployeeCredentialsRemovedEvent struct {
+	EmployeeID   string `json:"employee_id"`
+	UserID       string `json:"user_id"`
+	Email        string `json:"email"`
+	RemovedBy    string `json:"removed_by"` // Actor who removed credentials
+	Reason       string `json:"reason,omitempty"`
+	TenantID     string `json:"tenant_id"`
+	TenantSlug   string `json:"tenant_slug"`
+	TenantSchema string `json:"tenant_schema"`
 }
 
 // Shift Events

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -46,6 +47,7 @@ type CreateUserRequest struct {
 	Password  string  `json:"password" validate:"required,min=6"`
 	FirstName string  `json:"first_name" validate:"required"`
 	LastName  string  `json:"last_name" validate:"required"`
+	Username  *string `json:"username,omitempty"` // Optional username for subdomain login
 	AvatarURL *string `json:"avatar_url"`
 	RoleName  string  `json:"role" validate:"required"`
 }
@@ -81,6 +83,7 @@ func (s *UserService) Create(ctx context.Context, req *CreateUserRequest, actorI
 
 	user := &domain.User{
 		Email:        req.Email,
+		Username:     req.Username,
 		PasswordHash: string(hashedPassword),
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -90,6 +93,13 @@ func (s *UserService) Create(ctx context.Context, req *CreateUserRequest, actorI
 
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, errors.Internal("failed to create user")
+	}
+
+	// Assign role to user via user_roles junction table
+	if err := s.userRepo.AssignRole(ctx, user.ID, role.ID); err != nil {
+		// Rollback: delete the user if role assignment fails
+		s.userRepo.SoftDelete(ctx, user.ID)
+		return nil, errors.Internal("failed to assign role to user")
 	}
 
 	// Get full user with role
@@ -608,10 +618,19 @@ func (s *UserService) ValidateCredentials(ctx context.Context, email, password s
 
 // ValidateCredentialsInTenant validates user credentials within a specific tenant schema
 // This is the O(1) path - the tenant context must already be set in ctx
+// Supports both email and username login
 // Used when auth service has resolved the tenant via the user-tenant lookup table
-func (s *UserService) ValidateCredentialsInTenant(ctx context.Context, email, password string) (*domain.User, error) {
-	// Lookup user by email within the tenant schema (from context)
-	user, err := s.userRepo.GetByEmail(ctx, email)
+func (s *UserService) ValidateCredentialsInTenant(ctx context.Context, identifier, password string) (*domain.User, error) {
+	var user *domain.User
+	var err error
+
+	// Try to lookup by email first (if identifier contains @), then by username
+	if strings.Contains(identifier, "@") {
+		user, err = s.userRepo.GetByEmail(ctx, identifier)
+	} else {
+		user, err = s.userRepo.GetByUsername(ctx, identifier)
+	}
+
 	if err != nil {
 		return nil, errors.InvalidCredentials()
 	}

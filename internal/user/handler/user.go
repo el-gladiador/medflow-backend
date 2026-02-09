@@ -322,13 +322,14 @@ func (h *UserHandler) RevokeAccessGiver(w http.ResponseWriter, r *http.Request) 
 }
 
 // ValidateCredentials validates user credentials (internal endpoint)
+// Supports login with email or username
 // Supports two paths:
 // 1. O(1) tenant-aware path: When X-Tenant-* headers are present (from auth service lookup table)
 // 2. Legacy O(N) path: Cross-tenant search when headers are missing (fallback during migration)
 func (h *UserHandler) ValidateCredentials(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Email    string `json:"email" validate:"required,email"`
-		Password string `json:"password" validate:"required"`
+		Identifier string `json:"identifier" validate:"required"` // Email or username
+		Password   string `json:"password" validate:"required"`
 	}
 	if err := httputil.DecodeJSON(r, &req); err != nil {
 		httputil.Error(w, err)
@@ -343,7 +344,7 @@ func (h *UserHandler) ValidateCredentials(w http.ResponseWriter, r *http.Request
 	if tenantID != "" && tenantSchema != "" {
 		// NEW PATH: O(1) tenant-aware validation
 		h.logger.Debug().
-			Str("email", req.Email).
+			Str("identifier", req.Identifier).
 			Str("tenant_id", tenantID).
 			Str("tenant_schema", tenantSchema).
 			Msg("validating credentials with tenant context (O(1) path)")
@@ -351,9 +352,9 @@ func (h *UserHandler) ValidateCredentials(w http.ResponseWriter, r *http.Request
 		// Add tenant context to request context
 		ctx := tenant.WithTenantContext(r.Context(), tenantID, tenantSlug, tenantSchema)
 
-		user, err := h.service.ValidateCredentialsInTenant(ctx, req.Email, req.Password)
+		user, err := h.service.ValidateCredentialsInTenant(ctx, req.Identifier, req.Password)
 		if err != nil {
-			h.logger.Debug().Str("email", req.Email).Msg("credential validation failed")
+			h.logger.Debug().Str("identifier", req.Identifier).Msg("credential validation failed")
 			httputil.Error(w, err)
 			return
 		}
@@ -383,12 +384,12 @@ func (h *UserHandler) ValidateCredentials(w http.ResponseWriter, r *http.Request
 
 	// LEGACY PATH: O(N) cross-tenant search (fallback during migration period)
 	h.logger.Debug().
-		Str("email", req.Email).
+		Str("identifier", req.Identifier).
 		Msg("validating credentials without tenant context (legacy O(N) path)")
 
-	user, tenantInfo, err := h.service.ValidateCredentials(r.Context(), req.Email, req.Password)
+	user, tenantInfo, err := h.service.ValidateCredentials(r.Context(), req.Identifier, req.Password)
 	if err != nil {
-		h.logger.Debug().Str("email", req.Email).Msg("credential validation failed")
+		h.logger.Debug().Str("identifier", req.Identifier).Msg("credential validation failed")
 		httputil.Error(w, err)
 		return
 	}
@@ -411,7 +412,7 @@ func (h *UserHandler) ValidateCredentials(w http.ResponseWriter, r *http.Request
 		// Tenant context - critical for multi-tenancy
 		"tenant_id":     tenantInfo.ID,
 		"tenant_slug":   tenantInfo.Slug,
-		"tenant_schema": tenantInfo.SchemaName,
+		"tenant_schema": tenantSchema,
 	}
 
 	httputil.JSON(w, http.StatusOK, response)

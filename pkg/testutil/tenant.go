@@ -352,22 +352,17 @@ func InventoryMigrations() []string {
 // These should be applied AFTER StaffMigrations (depends on employees table)
 func TimeTrackingMigrations() []string {
 	return []string{
-		// Time entries table
+		// Time entries table (matches migrations/staff/tenant/000003)
 		`CREATE TABLE IF NOT EXISTS time_entries (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-			work_date DATE NOT NULL,
+			entry_date DATE NOT NULL,
 			clock_in TIMESTAMPTZ NOT NULL,
 			clock_out TIMESTAMPTZ,
-			gross_minutes INT,
-			net_minutes INT,
-			break_minutes INT DEFAULT 0,
-			status VARCHAR(20) NOT NULL DEFAULT 'active',
-			entry_type VARCHAR(20) NOT NULL DEFAULT 'clock',
-			shift_assignment_id UUID,
-			has_arbzg_violation BOOLEAN DEFAULT FALSE,
-			violation_types JSONB DEFAULT '[]',
+			total_work_minutes INTEGER NOT NULL DEFAULT 0,
+			total_break_minutes INTEGER NOT NULL DEFAULT 0,
 			notes TEXT,
+			is_manual_entry BOOLEAN NOT NULL DEFAULT FALSE,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			deleted_at TIMESTAMPTZ,
@@ -375,15 +370,31 @@ func TimeTrackingMigrations() []string {
 			updated_by UUID
 		)`,
 
-		// Time entry breaks table
-		`CREATE TABLE IF NOT EXISTS time_entry_breaks (
+		// Time breaks table (matches migrations/staff/tenant/000003)
+		`CREATE TABLE IF NOT EXISTS time_breaks (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			time_entry_id UUID NOT NULL REFERENCES time_entries(id) ON DELETE CASCADE,
-			break_start TIMESTAMPTZ NOT NULL,
-			break_end TIMESTAMPTZ,
-			duration_minutes INT,
-			break_type VARCHAR(20) NOT NULL DEFAULT 'regular',
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			start_time TIMESTAMPTZ NOT NULL,
+			end_time TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+
+		// Time corrections table (matches migrations/staff/tenant/000003)
+		`CREATE TABLE IF NOT EXISTS time_corrections (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+			time_entry_id UUID REFERENCES time_entries(id) ON DELETE SET NULL,
+			correction_date DATE NOT NULL,
+			original_clock_in TIMESTAMPTZ,
+			original_clock_out TIMESTAMPTZ,
+			corrected_clock_in TIMESTAMPTZ,
+			corrected_clock_out TIMESTAMPTZ,
+			reason TEXT NOT NULL,
+			corrected_by UUID NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			deleted_at TIMESTAMPTZ
 		)`,
 
 		// Shift templates table
@@ -478,10 +489,14 @@ func TimeTrackingMigrations() []string {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 
-		// Indexes for time entries
+		// Indexes (matches migrations/staff/tenant/000003)
+		`CREATE INDEX IF NOT EXISTS idx_time_entries_employee_date ON time_entries(employee_id, entry_date) WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_time_entries_date ON time_entries(entry_date) WHERE deleted_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_time_entries_employee ON time_entries(employee_id) WHERE deleted_at IS NULL`,
-		`CREATE INDEX IF NOT EXISTS idx_time_entries_work_date ON time_entries(work_date) WHERE deleted_at IS NULL`,
-		`CREATE INDEX IF NOT EXISTS idx_time_entries_active ON time_entries(employee_id) WHERE status = 'active' AND deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_time_entries_active ON time_entries(employee_id, clock_out) WHERE deleted_at IS NULL AND clock_out IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_time_breaks_entry ON time_breaks(time_entry_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_time_breaks_active ON time_breaks(time_entry_id, end_time) WHERE end_time IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_time_corrections_employee ON time_corrections(employee_id, correction_date) WHERE deleted_at IS NULL`,
 	}
 }
 

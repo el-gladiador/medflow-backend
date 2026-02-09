@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/medflow/medflow-backend/internal/staff/client"
 	"github.com/medflow/medflow-backend/internal/staff/consumers"
 	"github.com/medflow/medflow-backend/internal/staff/events"
 	"github.com/medflow/medflow-backend/internal/staff/handler"
@@ -62,6 +63,7 @@ func main() {
 	shiftRepo := repository.NewShiftRepository(db)
 	absenceRepo := repository.NewAbsenceRepository(db)
 	timeTrackingRepo := repository.NewTimeTrackingRepository(db)
+	complianceRepo := repository.NewComplianceRepository(db)
 
 	// Initialize validators
 	germanValidator := validation.NewGermanValidator()
@@ -70,17 +72,29 @@ func main() {
 	staffService := service.NewStaffService(employeeRepo, publisher, germanValidator, log)
 	shiftService := service.NewShiftService(shiftRepo, publisher, log)
 	absenceService := service.NewAbsenceService(absenceRepo, publisher, log)
-	timeTrackingService := service.NewTimeTrackingService(timeTrackingRepo, publisher, log)
+	complianceService := service.NewComplianceService(complianceRepo, timeTrackingRepo, shiftRepo, log)
+	timeTrackingService := service.NewTimeTrackingService(timeTrackingRepo, complianceService, publisher, log)
+
+	// Initialize user service client for creating user accounts
+	userServiceURL := os.Getenv("USER_SERVICE_URL")
+	if userServiceURL == "" {
+		userServiceURL = "http://localhost:8082" // Default to user service port
+	}
+	userClient := client.NewUserClient(userServiceURL, log)
+
+	// Set user client on staff service for credential management
+	staffService.SetUserClient(userClient)
 
 	// Initialize handlers
-	employeeHandler := handler.NewEmployeeHandler(staffService, log)
+	employeeHandler := handler.NewEmployeeHandler(staffService, userClient, log)
 	validationHandler := handler.NewValidationHandler(germanValidator, log)
 	shiftHandler := handler.NewShiftHandler(shiftService, log)
 	absenceHandler := handler.NewAbsenceHandler(absenceService, log)
-	timeTrackingHandler := handler.NewTimeTrackingHandler(timeTrackingService, log)
+	timeTrackingHandler := handler.NewTimeTrackingHandler(timeTrackingService, staffService, log)
+	complianceHandler := handler.NewComplianceHandler(complianceService, staffService, log)
 
 	// Start user event consumer
-	userConsumer, err := consumers.NewUserEventConsumer(rmq, userCacheRepo, log)
+	userConsumer, err := consumers.NewUserEventConsumer(rmq, userCacheRepo, employeeRepo, staffService, log)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create user event consumer")
 	}
@@ -91,6 +105,22 @@ func main() {
 	if err := userConsumer.Start(ctx); err != nil {
 		log.Fatal().Err(err).Msg("failed to start user event consumer")
 	}
+
+	// Start periodic compliance checker (ArbZG monitoring)
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := complianceService.CheckAllActiveEmployees(ctx); err != nil {
+					log.Error().Err(err).Msg("periodic compliance check failed")
+				}
+			}
+		}
+	}()
 
 	// Create router
 	r := chi.NewRouter()
@@ -127,6 +157,13 @@ func main() {
 			r.Get("/{id}/files", employeeHandler.ListFiles)
 			r.Post("/{id}/files", employeeHandler.UploadFile)
 			r.Delete("/{id}/files/{fileId}", employeeHandler.DeleteFile)
+
+			// Credential management endpoints
+			r.Route("/{id}/credentials", func(r chi.Router) {
+				r.Post("/", employeeHandler.AddCredentials)
+				r.Delete("/", employeeHandler.RemoveCredentials)
+				r.Get("/", employeeHandler.GetCredentialStatus)
+			})
 		})
 
 		// Shift Template routes
@@ -178,10 +215,14 @@ func main() {
 
 	// Time Tracking routes (under /api/v1/time-tracking)
 	r.Route("/api/v1/time-tracking", func(r chi.Router) {
+		// Current user's status (for PersonalClockBar)
+		r.Get("/my-status", timeTrackingHandler.GetMyStatus)
+
 		// Status and entries
 		r.Get("/statuses", timeTrackingHandler.GetAllStatuses)
 		r.Get("/entries", timeTrackingHandler.GetEntriesByDate)
 		r.Patch("/entries/{id}", timeTrackingHandler.UpdateEntry)
+		r.Patch("/entries/{id}/breaks", timeTrackingHandler.UpdateEntryBreaks)
 		r.Delete("/entries/{id}", timeTrackingHandler.DeleteEntry)
 
 		// Corrections
@@ -198,6 +239,42 @@ func main() {
 			r.Get("/history", timeTrackingHandler.GetEmployeeHistory)
 			r.Get("/corrections", timeTrackingHandler.GetEmployeeCorrections)
 		})
+	})
+
+	// Compliance routes (ArbZG - German Labor Law)
+	r.Route("/api/v1/compliance", func(r chi.Router) {
+		// Break validation
+		r.Get("/break/check", complianceHandler.CheckBreakEnd)
+		r.Get("/employees/{id}/break/check", complianceHandler.CheckBreakEndForEmployee)
+
+		// Clock out compliance check
+		r.Get("/clock-out/check", complianceHandler.CheckClockOut)
+
+		// Shift validation
+		r.Post("/shifts/validate", complianceHandler.ValidateShift)
+
+		// Alerts (manager view)
+		r.Get("/alerts", complianceHandler.GetActiveAlerts)
+		r.Post("/alerts/{id}/dismiss", complianceHandler.DismissAlert)
+
+		// Violations (manager view)
+		r.Get("/violations", complianceHandler.GetViolations)
+		r.Post("/violations/{id}/acknowledge", complianceHandler.AcknowledgeViolation)
+
+		// Time correction requests
+		r.Post("/correction-requests", complianceHandler.CreateCorrectionRequest)
+		r.Get("/correction-requests/my", complianceHandler.GetMyCorrectionRequests)
+		r.Get("/correction-requests/pending", complianceHandler.GetPendingCorrectionRequests)
+		r.Get("/correction-requests/{id}", complianceHandler.GetCorrectionRequest)
+		r.Post("/correction-requests/{id}/approve", complianceHandler.ApproveCorrectionRequest)
+		r.Post("/correction-requests/{id}/reject", complianceHandler.RejectCorrectionRequest)
+
+		// Settings (admin)
+		r.Get("/settings", complianceHandler.GetSettings)
+		r.Put("/settings", complianceHandler.UpdateSettings)
+
+		// Manual compliance check trigger
+		r.Post("/check-all", complianceHandler.RunComplianceCheck)
 	})
 
 	// Create server

@@ -168,6 +168,7 @@ services:
       - MEDFLOW_DATABASE_DATABASE=medflow_staff
       - MEDFLOW_RABBITMQ_URL=amqp://medflow:${RABBITMQ_PASSWORD:-devpassword}@rabbitmq:5672/
       - MEDFLOW_JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+      - USER_SERVICE_URL=http://user-service:8082
     ports:
       - "8083:8083"
     depends_on:

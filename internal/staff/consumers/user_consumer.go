@@ -2,8 +2,11 @@ package consumers
 
 import (
 	"context"
+	"strings"
+	"time"
 
 	"github.com/medflow/medflow-backend/internal/staff/repository"
+	"github.com/medflow/medflow-backend/internal/staff/service"
 	"github.com/medflow/medflow-backend/pkg/logger"
 	"github.com/medflow/medflow-backend/pkg/messaging"
 	"github.com/medflow/medflow-backend/pkg/tenant"
@@ -13,11 +16,19 @@ import (
 type UserEventConsumer struct {
 	consumer      *messaging.Consumer
 	userCacheRepo *repository.UserCacheRepository
+	employeeRepo  *repository.EmployeeRepository
+	staffService  *service.StaffService
 	logger        *logger.Logger
 }
 
 // NewUserEventConsumer creates a new user event consumer
-func NewUserEventConsumer(rmq *messaging.RabbitMQ, userCacheRepo *repository.UserCacheRepository, log *logger.Logger) (*UserEventConsumer, error) {
+func NewUserEventConsumer(
+	rmq *messaging.RabbitMQ,
+	userCacheRepo *repository.UserCacheRepository,
+	employeeRepo *repository.EmployeeRepository,
+	staffService *service.StaffService,
+	log *logger.Logger,
+) (*UserEventConsumer, error) {
 	consumer, err := messaging.NewConsumer(rmq, "staff-service.user-events", log)
 	if err != nil {
 		return nil, err
@@ -31,6 +42,8 @@ func NewUserEventConsumer(rmq *messaging.RabbitMQ, userCacheRepo *repository.Use
 	c := &UserEventConsumer{
 		consumer:      consumer,
 		userCacheRepo: userCacheRepo,
+		employeeRepo:  employeeRepo,
+		staffService:  staffService,
 		logger:        log,
 	}
 
@@ -62,14 +75,26 @@ func (c *UserEventConsumer) handleUserCreated(ctx context.Context, event *messag
 	ctx = tenant.WithTenantContext(ctx, data.TenantID, data.TenantSlug, data.TenantSchema)
 
 	// Update cache
-	return c.userCacheRepo.Set(ctx, &repository.CachedUser{
+	if err := c.userCacheRepo.Set(ctx, &repository.CachedUser{
 		UserID:    data.UserID,
 		FirstName: data.FirstName,
 		LastName:  data.LastName,
 		Email:     &data.Email,
 		RoleName:  &data.RoleName,
 		TenantID:  data.TenantID,
-	})
+	}); err != nil {
+		c.logger.Error().Err(err).Str("user_id", data.UserID).Msg("failed to update user cache")
+		// Continue even if cache update fails
+	}
+
+	// Create employee record automatically
+	if err := c.createEmployeeForUser(ctx, &data); err != nil {
+		c.logger.Error().Err(err).Str("user_id", data.UserID).Msg("failed to create employee record")
+		// Don't fail the event - employee can be created manually later
+		// This ensures user creation isn't blocked
+	}
+
+	return nil
 }
 
 func (c *UserEventConsumer) handleUserUpdated(ctx context.Context, event *messaging.Event) error {
@@ -121,4 +146,56 @@ func (c *UserEventConsumer) handleUserDeleted(ctx context.Context, event *messag
 
 	// Remove from cache
 	return c.userCacheRepo.Delete(ctx, data.UserID)
+}
+
+// createEmployeeForUser creates an employee record for a newly created user
+func (c *UserEventConsumer) createEmployeeForUser(ctx context.Context, userData *messaging.UserCreatedEvent) error {
+	// Check if employee already exists for this user (idempotency)
+	existing, _ := c.employeeRepo.GetByUserID(ctx, userData.UserID)
+	if existing != nil {
+		c.logger.Info().
+			Str("user_id", userData.UserID).
+			Msg("employee already exists, skipping creation")
+		return nil // Idempotent - don't fail if already exists
+	}
+
+	// Map user data to employee
+	jobTitle := mapRoleToJobTitle(userData.RoleName)
+	hireDate := time.Now() // User creation date as hire date
+
+	employee := &repository.Employee{
+		UserID:         &userData.UserID,
+		FirstName:      userData.FirstName,
+		LastName:       userData.LastName,
+		Email:          &userData.Email,
+		EmploymentType: "full_time",
+		HireDate:       hireDate,
+		Status:         "active",
+		JobTitle:       &jobTitle,
+		// Department and EmployeeNumber remain null (set manually later)
+	}
+
+	c.logger.Info().
+		Str("user_id", userData.UserID).
+		Str("job_title", jobTitle).
+		Msg("creating employee record for user")
+
+	return c.staffService.Create(ctx, employee)
+}
+
+// mapRoleToJobTitle maps user role names to employee job titles
+func mapRoleToJobTitle(roleName string) string {
+	switch roleName {
+	case "admin":
+		return "Administrator"
+	case "manager":
+		return "Manager"
+	case "staff":
+		return "Staff Member"
+	case "viewer":
+		return "Viewer"
+	default:
+		// Capitalize the role name for unknown roles
+		return strings.Title(roleName)
+	}
 }

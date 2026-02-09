@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"encoding/json"
+	stderrors "errors"
 	"net/http"
 	"time"
 
@@ -14,15 +16,17 @@ import (
 
 // TimeTrackingHandler handles time tracking endpoints
 type TimeTrackingHandler struct {
-	service *service.TimeTrackingService
-	logger  *logger.Logger
+	service      *service.TimeTrackingService
+	staffService *service.StaffService
+	logger       *logger.Logger
 }
 
 // NewTimeTrackingHandler creates a new time tracking handler
-func NewTimeTrackingHandler(svc *service.TimeTrackingService, log *logger.Logger) *TimeTrackingHandler {
+func NewTimeTrackingHandler(svc *service.TimeTrackingService, staffSvc *service.StaffService, log *logger.Logger) *TimeTrackingHandler {
 	return &TimeTrackingHandler{
-		service: svc,
-		logger:  log,
+		service:      svc,
+		staffService: staffSvc,
+		logger:       log,
 	}
 }
 
@@ -36,6 +40,109 @@ func (h *TimeTrackingHandler) GetAllStatuses(w http.ResponseWriter, r *http.Requ
 	}
 
 	httputil.JSON(w, http.StatusOK, statuses)
+}
+
+// MyTimeStatus represents the current user's time tracking status for the personal clock bar
+type MyTimeStatus struct {
+	EmployeeID       string     `json:"employee_id"`
+	EmployeeName     string     `json:"employee_name"`
+	Status           string     `json:"status"` // clocked_out, clocked_in, on_break
+	ClockIn          *time.Time `json:"clock_in,omitempty"`
+	BreakStart       *time.Time `json:"break_start,omitempty"`
+	TodayWorkMinutes int        `json:"today_work_minutes"`
+	TodayBreakMinutes int       `json:"today_break_minutes"`
+	WeekTotalMinutes int        `json:"week_total_minutes"`
+}
+
+// GetMyStatus returns the current user's time tracking status
+// GET /time-tracking/my-status
+func (h *TimeTrackingHandler) GetMyStatus(w http.ResponseWriter, r *http.Request) {
+	// Get user ID from header (set by API Gateway from JWT)
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		httputil.Error(w, errors.Unauthorized("user not authenticated"))
+		return
+	}
+
+	// Get employee record for this user
+	employee, err := h.staffService.GetByUserID(r.Context(), userID)
+	if err != nil {
+		// If employee not found, user is not linked to an employee record
+		// Return a "not an employee" status
+		if stderrors.Is(err, errors.ErrNotFound) {
+			httputil.JSON(w, http.StatusOK, MyTimeStatus{
+				Status: "not_employee",
+			})
+			return
+		}
+		httputil.Error(w, err)
+		return
+	}
+
+	// Get time status for this employee
+	status, err := h.service.GetEmployeeStatus(r.Context(), employee.ID)
+	if err != nil {
+		httputil.Error(w, err)
+		return
+	}
+
+	// Build response with calculated real-time minutes
+	response := MyTimeStatus{
+		EmployeeID:       employee.ID,
+		EmployeeName:     employee.FirstName + " " + employee.LastName,
+		Status:           status.Status,
+		ClockIn:          status.ClockIn,
+		BreakStart:       status.BreakStart,
+		WeekTotalMinutes: status.WeekTotalMinutes,
+	}
+
+	// Calculate real-time work minutes for today
+	// If currently clocked in, add elapsed time since clock_in
+	if status.Status == "clocked_in" && status.ClockIn != nil {
+		elapsedMinutes := int(time.Since(*status.ClockIn).Minutes())
+		// Get completed breaks for today from the active entry
+		if status.TimeEntryID != nil {
+			entry, err := h.service.GetEntryByID(r.Context(), *status.TimeEntryID)
+			if err == nil && entry != nil {
+				response.TodayBreakMinutes = entry.TotalBreakMinutes
+				response.TodayWorkMinutes = elapsedMinutes - entry.TotalBreakMinutes
+				if response.TodayWorkMinutes < 0 {
+					response.TodayWorkMinutes = 0
+				}
+				// Include today's real-time work in week total
+				response.WeekTotalMinutes = status.WeekTotalMinutes + response.TodayWorkMinutes - status.TodayWorkMinutes
+			}
+		} else {
+			response.TodayWorkMinutes = elapsedMinutes
+			response.WeekTotalMinutes = status.WeekTotalMinutes + elapsedMinutes - status.TodayWorkMinutes
+		}
+	} else if status.Status == "on_break" && status.ClockIn != nil {
+		// On break: work time is elapsed since clock_in minus all breaks
+		elapsedMinutes := int(time.Since(*status.ClockIn).Minutes())
+		if status.TimeEntryID != nil {
+			entry, err := h.service.GetEntryByID(r.Context(), *status.TimeEntryID)
+			if err == nil && entry != nil {
+				// Calculate current break duration
+				currentBreakMinutes := 0
+				if status.BreakStart != nil {
+					currentBreakMinutes = int(time.Since(*status.BreakStart).Minutes())
+				}
+				response.TodayBreakMinutes = entry.TotalBreakMinutes + currentBreakMinutes
+				response.TodayWorkMinutes = elapsedMinutes - response.TodayBreakMinutes
+				if response.TodayWorkMinutes < 0 {
+					response.TodayWorkMinutes = 0
+				}
+				// Include today's real-time work in week total
+				response.WeekTotalMinutes = status.WeekTotalMinutes + response.TodayWorkMinutes - status.TodayWorkMinutes
+			}
+		}
+	} else {
+		// Clocked out - use stored totals
+		response.TodayWorkMinutes = status.TodayWorkMinutes
+		response.TodayBreakMinutes = status.TodayBreakMinutes
+	}
+
+	httputil.JSON(w, http.StatusOK, response)
 }
 
 // GetEntriesByDate returns all time entries for a specific date
@@ -63,13 +170,15 @@ func (h *TimeTrackingHandler) GetEntriesByDate(w http.ResponseWriter, r *http.Re
 
 // UpdateEntry updates a time entry
 // PATCH /time-tracking/entries/{id}
+// Supports clock_out: null to clear the clock-out time (resets employee to "working")
 func (h *TimeTrackingHandler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
+	// Use json.RawMessage for clock_out to distinguish between absent, null, and string value
 	var req struct {
-		ClockIn  *string `json:"clock_in"`
-		ClockOut *string `json:"clock_out"`
-		Notes    *string `json:"notes"`
+		ClockIn  *string          `json:"clock_in"`
+		ClockOut json.RawMessage  `json:"clock_out"`
+		Notes    *string          `json:"notes"`
 	}
 	if err := httputil.DecodeJSON(r, &req); err != nil {
 		httputil.Error(w, err)
@@ -85,14 +194,28 @@ func (h *TimeTrackingHandler) UpdateEntry(w http.ResponseWriter, r *http.Request
 		}
 		updates["clock_in"] = clockIn
 	}
+
+	// Handle clock_out: absent (not in JSON) vs null vs string value
 	if req.ClockOut != nil {
-		clockOut, err := time.Parse(time.RFC3339, *req.ClockOut)
-		if err != nil {
-			httputil.Error(w, errors.BadRequest("invalid clock_out format"))
-			return
+		if string(req.ClockOut) == "null" {
+			// Explicit null — clear the clock-out time
+			updates["clock_out_clear"] = true
+		} else {
+			// String value — parse as RFC3339
+			var clockOutStr string
+			if err := json.Unmarshal(req.ClockOut, &clockOutStr); err != nil {
+				httputil.Error(w, errors.BadRequest("invalid clock_out format"))
+				return
+			}
+			clockOut, err := time.Parse(time.RFC3339, clockOutStr)
+			if err != nil {
+				httputil.Error(w, errors.BadRequest("invalid clock_out format"))
+				return
+			}
+			updates["clock_out"] = clockOut
 		}
-		updates["clock_out"] = clockOut
 	}
+
 	if req.Notes != nil {
 		updates["notes"] = *req.Notes
 	}
@@ -100,6 +223,61 @@ func (h *TimeTrackingHandler) UpdateEntry(w http.ResponseWriter, r *http.Request
 	userID := r.Header.Get("X-User-ID")
 
 	entry, err := h.service.UpdateEntry(r.Context(), id, updates, userID)
+	if err != nil {
+		httputil.Error(w, err)
+		return
+	}
+
+	httputil.JSON(w, http.StatusOK, entry)
+}
+
+// UpdateEntryBreaks replaces all breaks for a time entry
+// PATCH /time-tracking/entries/{id}/breaks
+func (h *TimeTrackingHandler) UpdateEntryBreaks(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req struct {
+		Breaks []struct {
+			ID        *string `json:"id"`
+			StartTime string  `json:"start_time"`
+			EndTime   *string `json:"end_time"`
+		} `json:"breaks"`
+	}
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.Error(w, err)
+		return
+	}
+
+	// Parse break inputs
+	var breaks []service.BreakInput
+	for _, b := range req.Breaks {
+		startTime, err := time.Parse(time.RFC3339, b.StartTime)
+		if err != nil {
+			httputil.Error(w, errors.BadRequest("invalid start_time format for break"))
+			return
+		}
+
+		bi := service.BreakInput{
+			StartTime: startTime,
+		}
+		if b.ID != nil {
+			bi.ID = *b.ID
+		}
+		if b.EndTime != nil && *b.EndTime != "" {
+			endTime, err := time.Parse(time.RFC3339, *b.EndTime)
+			if err != nil {
+				httputil.Error(w, errors.BadRequest("invalid end_time format for break"))
+				return
+			}
+			bi.EndTime = &endTime
+		}
+
+		breaks = append(breaks, bi)
+	}
+
+	userID := r.Header.Get("X-User-ID")
+
+	entry, err := h.service.ReplaceBreaksForEntry(r.Context(), id, breaks, userID)
 	if err != nil {
 		httputil.Error(w, err)
 		return

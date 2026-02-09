@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/medflow/medflow-backend/internal/staff/repository"
 	"github.com/medflow/medflow-backend/pkg/testutil"
 	"github.com/stretchr/testify/assert"
@@ -321,4 +322,315 @@ func TestEmployeeRepository_Address(t *testing.T) {
 
 func strPtr(s string) *string {
 	return &s
+}
+
+// ============================================================================
+// CREDENTIAL MANAGEMENT TESTS
+// ============================================================================
+
+func TestEmployeeRepository_UpdateUserID(t *testing.T) {
+	ctx := context.Background()
+
+	// Setup a tenant with staff migrations
+	tenant := suite.SetupStaffTenant(t, ctx, "test-update-user-id")
+
+	// Create repository with the suite's DB
+	repo := repository.NewEmployeeRepository(suite.DB)
+
+	// Create tenant context
+	tenantCtx := suite.TenantContext(tenant)
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// Create an employee without user_id
+	emp := &repository.Employee{
+		FirstName:      "TestUser",
+		LastName:       "LinkEmployee",
+		EmploymentType: "full_time",
+		HireDate:       now,
+		Status:         "active",
+		Email:          strPtr("test@example.com"),
+	}
+	err := repo.Create(tenantCtx, emp)
+	require.NoError(t, err)
+	assert.Nil(t, emp.UserID) // Initially no user_id
+
+	// Update user_id (must be valid UUID)
+	userID := uuid.New().String()
+	err = repo.UpdateUserID(tenantCtx, emp.ID, userID)
+	require.NoError(t, err)
+
+	// Verify user_id was set
+	updated, err := repo.GetByID(tenantCtx, emp.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated.UserID)
+	assert.Equal(t, userID, *updated.UserID)
+}
+
+func TestEmployeeRepository_UpdateUserID_AlreadyHasUserID(t *testing.T) {
+	ctx := context.Background()
+
+	// Setup a tenant with staff migrations
+	tenant := suite.SetupStaffTenant(t, ctx, "test-update-user-id-conflict")
+
+	// Create repository with the suite's DB
+	repo := repository.NewEmployeeRepository(suite.DB)
+
+	// Create tenant context
+	tenantCtx := suite.TenantContext(tenant)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	existingUserID := uuid.New().String()
+
+	// Create an employee WITH user_id already set
+	emp := &repository.Employee{
+		FirstName:      "HasUser",
+		LastName:       "Already",
+		EmploymentType: "full_time",
+		HireDate:       now,
+		Status:         "active",
+		Email:          strPtr("hasuser@example.com"),
+		UserID:         &existingUserID,
+	}
+	err := repo.Create(tenantCtx, emp)
+	require.NoError(t, err)
+
+	// Try to update user_id - should fail with conflict error
+	newUserID := uuid.New().String()
+	err = repo.UpdateUserID(tenantCtx, emp.ID, newUserID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already has user credentials")
+
+	// Verify original user_id is unchanged
+	retrieved, err := repo.GetByID(tenantCtx, emp.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved.UserID)
+	assert.Equal(t, existingUserID, *retrieved.UserID)
+}
+
+func TestEmployeeRepository_UpdateUserID_NotFound(t *testing.T) {
+	ctx := context.Background()
+
+	// Setup a tenant with staff migrations
+	tenant := suite.SetupStaffTenant(t, ctx, "test-update-user-id-notfound")
+
+	// Create repository with the suite's DB
+	repo := repository.NewEmployeeRepository(suite.DB)
+
+	// Create tenant context
+	tenantCtx := suite.TenantContext(tenant)
+
+	// Try to update user_id for non-existent employee (use valid UUID format)
+	nonExistentID := uuid.New().String()
+	userID := uuid.New().String()
+	err := repo.UpdateUserID(tenantCtx, nonExistentID, userID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestEmployeeRepository_ClearUserID(t *testing.T) {
+	ctx := context.Background()
+
+	// Setup a tenant with staff migrations
+	tenant := suite.SetupStaffTenant(t, ctx, "test-clear-user-id")
+
+	// Create repository with the suite's DB
+	repo := repository.NewEmployeeRepository(suite.DB)
+
+	// Create tenant context
+	tenantCtx := suite.TenantContext(tenant)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	userID := uuid.New().String()
+
+	// Create an employee with user_id
+	emp := &repository.Employee{
+		FirstName:      "Clear",
+		LastName:       "UserID",
+		EmploymentType: "full_time",
+		HireDate:       now,
+		Status:         "active",
+		Email:          strPtr("clear@example.com"),
+		UserID:         &userID,
+	}
+	err := repo.Create(tenantCtx, emp)
+	require.NoError(t, err)
+	require.NotNil(t, emp.UserID)
+
+	// Clear user_id
+	err = repo.ClearUserID(tenantCtx, emp.ID)
+	require.NoError(t, err)
+
+	// Verify user_id was cleared
+	updated, err := repo.GetByID(tenantCtx, emp.ID)
+	require.NoError(t, err)
+	assert.Nil(t, updated.UserID)
+}
+
+func TestEmployeeRepository_ClearUserID_NotFound(t *testing.T) {
+	ctx := context.Background()
+
+	// Setup a tenant with staff migrations
+	tenant := suite.SetupStaffTenant(t, ctx, "test-clear-user-id-notfound")
+
+	// Create repository with the suite's DB
+	repo := repository.NewEmployeeRepository(suite.DB)
+
+	// Create tenant context
+	tenantCtx := suite.TenantContext(tenant)
+
+	// Try to clear user_id for non-existent employee (use valid UUID format)
+	nonExistentID := uuid.New().String()
+	err := repo.ClearUserID(tenantCtx, nonExistentID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestEmployeeRepository_UpdateUserID_TenantIsolation(t *testing.T) {
+	ctx := context.Background()
+
+	// Setup two separate tenants
+	tenant1 := suite.SetupStaffTenant(t, ctx, "test-userid-isolation-1")
+	tenant2 := suite.SetupStaffTenant(t, ctx, "test-userid-isolation-2")
+
+	// Create repository with the suite's DB
+	repo := repository.NewEmployeeRepository(suite.DB)
+
+	// Create contexts for each tenant
+	ctx1 := suite.TenantContext(tenant1)
+	ctx2 := suite.TenantContext(tenant2)
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// Create employee in tenant 1
+	emp1 := &repository.Employee{
+		FirstName:      "Tenant1",
+		LastName:       "Credentials",
+		EmploymentType: "full_time",
+		HireDate:       now,
+		Status:         "active",
+		Email:          strPtr("tenant1@example.com"),
+	}
+	err := repo.Create(ctx1, emp1)
+	require.NoError(t, err)
+
+	// Create employee in tenant 2
+	emp2 := &repository.Employee{
+		FirstName:      "Tenant2",
+		LastName:       "Credentials",
+		EmploymentType: "full_time",
+		HireDate:       now,
+		Status:         "active",
+		Email:          strPtr("tenant2@example.com"),
+	}
+	err = repo.Create(ctx2, emp2)
+	require.NoError(t, err)
+
+	maliciousUserID := uuid.New().String()
+	legitimateUserID := uuid.New().String()
+
+	// CRITICAL: Try to update tenant1's employee user_id from tenant2 context
+	// This MUST fail - cross-tenant access should not be allowed
+	err = repo.UpdateUserID(ctx2, emp1.ID, maliciousUserID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+
+	// Verify tenant1's employee is unchanged
+	retrieved, err := repo.GetByID(ctx1, emp1.ID)
+	require.NoError(t, err)
+	assert.Nil(t, retrieved.UserID) // Should still be nil
+
+	// Now properly update tenant1's employee from tenant1 context
+	err = repo.UpdateUserID(ctx1, emp1.ID, legitimateUserID)
+	require.NoError(t, err)
+
+	// CRITICAL: Try to clear tenant1's employee user_id from tenant2 context
+	// This MUST fail
+	err = repo.ClearUserID(ctx2, emp1.ID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+
+	// Verify tenant1's employee user_id is still set
+	retrieved, err = repo.GetByID(ctx1, emp1.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved.UserID)
+	assert.Equal(t, legitimateUserID, *retrieved.UserID)
+}
+
+func TestEmployeeRepository_GetByUserID(t *testing.T) {
+	ctx := context.Background()
+
+	// Setup a tenant with staff migrations
+	tenant := suite.SetupStaffTenant(t, ctx, "test-get-by-user-id")
+
+	// Create repository with the suite's DB
+	repo := repository.NewEmployeeRepository(suite.DB)
+
+	// Create tenant context
+	tenantCtx := suite.TenantContext(tenant)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	userID := uuid.New().String()
+
+	// Create an employee with user_id
+	emp := &repository.Employee{
+		FirstName:      "UserLookup",
+		LastName:       "Test",
+		EmploymentType: "full_time",
+		HireDate:       now,
+		Status:         "active",
+		Email:          strPtr("userlookup@example.com"),
+		UserID:         &userID,
+	}
+	err := repo.Create(tenantCtx, emp)
+	require.NoError(t, err)
+
+	// Lookup by user_id
+	retrieved, err := repo.GetByUserID(tenantCtx, userID)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved)
+	assert.Equal(t, emp.ID, retrieved.ID)
+	assert.Equal(t, "UserLookup", retrieved.FirstName)
+}
+
+func TestEmployeeRepository_GetByUserID_TenantIsolation(t *testing.T) {
+	ctx := context.Background()
+
+	// Setup two separate tenants
+	tenant1 := suite.SetupStaffTenant(t, ctx, "test-getbyuserid-isolation-1")
+	tenant2 := suite.SetupStaffTenant(t, ctx, "test-getbyuserid-isolation-2")
+
+	// Create repository with the suite's DB
+	repo := repository.NewEmployeeRepository(suite.DB)
+
+	// Create contexts for each tenant
+	ctx1 := suite.TenantContext(tenant1)
+	ctx2 := suite.TenantContext(tenant2)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	userID := uuid.New().String()
+
+	// Create employee with user_id in tenant 1
+	emp1 := &repository.Employee{
+		FirstName:      "Tenant1",
+		LastName:       "UserLookup",
+		EmploymentType: "full_time",
+		HireDate:       now,
+		Status:         "active",
+		Email:          strPtr("tenant1lookup@example.com"),
+		UserID:         &userID,
+	}
+	err := repo.Create(ctx1, emp1)
+	require.NoError(t, err)
+
+	// CRITICAL: Tenant 2 should NOT be able to find tenant 1's employee by user_id
+	notFound, err := repo.GetByUserID(ctx2, userID)
+	require.Error(t, err)
+	assert.Nil(t, notFound)
+
+	// Tenant 1 should find their own employee
+	found, err := repo.GetByUserID(ctx1, userID)
+	require.NoError(t, err)
+	require.NotNil(t, found)
+	assert.Equal(t, emp1.ID, found.ID)
 }

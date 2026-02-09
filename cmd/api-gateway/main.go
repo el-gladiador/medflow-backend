@@ -41,9 +41,28 @@ func main() {
 	r.Use(httputil.Recoverer(log))
 	r.Use(middleware.Timeout(60 * time.Second))
 
-	// CORS
+	// CORS - supports subdomain-based multi-tenancy
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:3000", "http://localhost:5173"},
+		AllowOriginFunc: func(r *http.Request, origin string) bool {
+			// Allow localhost variations (development)
+			// Matches: http://localhost:3000, http://demo-clinic.localhost:3000, etc.
+			if origin == "http://localhost:3000" || origin == "http://localhost:5173" {
+				return true
+			}
+			// Allow *.localhost:3000 subdomains for development
+			if len(origin) > 21 && origin[len(origin)-15:] == ".localhost:3000" {
+				return true
+			}
+			// Allow *.medflow.de for production
+			if len(origin) > 11 && origin[len(origin)-11:] == ".medflow.de" {
+				return true
+			}
+			// Allow medflow.de itself
+			if origin == "https://medflow.de" || origin == "http://medflow.de" {
+				return true
+			}
+			return false
+		},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID", "Accept-Language"},
 		ExposedHeaders:   []string{"X-Request-ID"},
@@ -174,10 +193,14 @@ func main() {
 
 			// Time Tracking routes
 			r.Route("/time-tracking", func(r chi.Router) {
+				// Current user's status (for PersonalClockBar / StempelButton)
+				r.Get("/my-status", proxy.ForwardToStaff)
+
 				// Status and entries
 				r.Get("/statuses", proxy.ForwardToStaff)
 				r.Get("/entries", proxy.ForwardToStaff)
 				r.Patch("/entries/{id}", proxy.ForwardToStaff)
+				r.Patch("/entries/{id}/breaks", proxy.ForwardToStaff)
 				r.Delete("/entries/{id}", proxy.ForwardToStaff)
 
 				// Corrections

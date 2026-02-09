@@ -145,6 +145,13 @@ create-tenant: ## Create tenant across all service databases (Usage: TENANT=test
 	@make migrate-inventory-tenant-up TENANT=$(TENANT)
 	@echo "Tenant tenant_$(TENANT) created successfully across all services!"
 
+# Backfill employee records for existing users
+backfill-employees: ## Backfill employee records for all existing users across all tenants
+	@./scripts/backfill_employees.sh
+
+verify-employees: ## Verify that all users have employee records
+	@./scripts/verify_employee_backfill.sh
+
 ## Development Workflow
 
 dev: infra-up ## Start infrastructure and run all services locally

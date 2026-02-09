@@ -8,6 +8,7 @@ import (
 type User struct {
 	ID           string  `json:"id" db:"id"`
 	Email        string  `json:"email" db:"email"`
+	Username     *string `json:"username,omitempty" db:"username"` // Optional username for login
 	PasswordHash string  `json:"-" db:"password_hash"`
 	FirstName    string  `json:"first_name" db:"first_name"`
 	LastName     string  `json:"last_name" db:"last_name"`

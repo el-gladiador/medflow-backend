@@ -5,23 +5,27 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/medflow/medflow-backend/internal/staff/client"
 	"github.com/medflow/medflow-backend/internal/staff/repository"
 	"github.com/medflow/medflow-backend/internal/staff/service"
+	"github.com/medflow/medflow-backend/pkg/errors"
 	"github.com/medflow/medflow-backend/pkg/httputil"
 	"github.com/medflow/medflow-backend/pkg/logger"
 )
 
 // EmployeeHandler handles employee endpoints
 type EmployeeHandler struct {
-	service *service.StaffService
-	logger  *logger.Logger
+	service    *service.StaffService
+	userClient *client.UserClient
+	logger     *logger.Logger
 }
 
 // NewEmployeeHandler creates a new employee handler
-func NewEmployeeHandler(svc *service.StaffService, log *logger.Logger) *EmployeeHandler {
+func NewEmployeeHandler(svc *service.StaffService, userClient *client.UserClient, log *logger.Logger) *EmployeeHandler {
 	return &EmployeeHandler{
-		service: svc,
-		logger:  log,
+		service:    svc,
+		userClient: userClient,
+		logger:     log,
 	}
 }
 
@@ -69,40 +73,127 @@ func (h *EmployeeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	httputil.JSON(w, http.StatusOK, employee)
 }
 
+// EmployeeCredentials represents user account credentials for an employee
+type EmployeeCredentials struct {
+	Username string `json:"username"`
+	Password string `json:"password" validate:"required,min=8"`
+	Role     string `json:"role" validate:"required"`
+}
+
+// CreateEmployeeRequest is the request structure for creating an employee
+type CreateEmployeeRequest struct {
+	Employee    repository.Employee  `json:"employee"`
+	Credentials *EmployeeCredentials `json:"credentials,omitempty"`
+}
+
 // Create creates a new employee
+// DEPRECATED: The optional credentials parameter is deprecated.
+// Use POST /employees/{id}/credentials to add credentials after employee creation.
+// This provides better separation of concerns and more reliable error handling.
 func (h *EmployeeHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var emp repository.Employee
-	if err := httputil.DecodeJSON(r, &emp); err != nil {
+	var req CreateEmployeeRequest
+	if err := httputil.DecodeJSON(r, &req); err != nil {
 		httputil.Error(w, err)
 		return
 	}
 
-	if err := h.service.Create(r.Context(), &emp); err != nil {
+	var userID *string
+
+	// If credentials provided, create user account first
+	if req.Credentials != nil {
+		// Validate email is provided when creating user account
+		if req.Employee.Email == nil || *req.Employee.Email == "" {
+			httputil.Error(w, errors.BadRequest("email is required when creating user account"))
+			return
+		}
+
+		h.logger.Info().
+			Str("email", *req.Employee.Email).
+			Str("role", req.Credentials.Role).
+			Msg("creating employee with user account")
+
+		// Create user account
+		var username *string
+		if req.Credentials.Username != "" {
+			username = &req.Credentials.Username
+		}
+		userReq := &client.CreateUserRequest{
+			Email:     *req.Employee.Email,
+			Password:  req.Credentials.Password,
+			FirstName: req.Employee.FirstName,
+			LastName:  req.Employee.LastName,
+			Username:  username,
+			RoleName:  req.Credentials.Role,
+			AvatarURL: req.Employee.AvatarURL,
+		}
+
+		user, err := h.userClient.CreateUser(r.Context(), userReq)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("failed to create user account")
+			httputil.Error(w, err)
+			return
+		}
+
+		userID = &user.ID
+		h.logger.Info().Str("user_id", user.ID).Msg("user account created")
+	}
+
+	// Set user_id link
+	req.Employee.UserID = userID
+
+	// Create employee
+	if err := h.service.Create(r.Context(), &req.Employee); err != nil {
+		h.logger.Error().Err(err).Msg("failed to create employee")
+
+		// Rollback: delete user account if it was created
+		if userID != nil {
+			h.logger.Warn().Str("user_id", *userID).Msg("rolling back user account creation")
+			if rollbackErr := h.userClient.DeleteUser(r.Context(), *userID); rollbackErr != nil {
+				h.logger.Error().Err(rollbackErr).Msg("failed to rollback user account")
+			}
+		}
+
 		httputil.Error(w, err)
 		return
 	}
 
-	httputil.Created(w, emp)
+	h.logger.Info().
+		Str("employee_id", req.Employee.ID).
+		Bool("has_user_account", userID != nil).
+		Msg("employee created successfully")
+
+	httputil.Created(w, req.Employee)
 }
 
 // Update updates an employee
 func (h *EmployeeHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	var emp repository.Employee
-	if err := httputil.DecodeJSON(r, &emp); err != nil {
+	// Fetch the existing employee first to preserve fields not in the request.
+	// Without this, partial JSON updates would zero out unmention fields
+	// because the repository does a full-column UPDATE.
+	existing, err := h.service.GetByID(r.Context(), id)
+	if err != nil {
 		httputil.Error(w, err)
 		return
 	}
 
-	emp.ID = id
-
-	if err := h.service.Update(r.Context(), &emp); err != nil {
+	// Decode partial update onto the existing employee.
+	// Go's JSON decoder only overwrites fields present in the JSON body,
+	// leaving all other fields at their current database values.
+	if err := httputil.DecodeJSON(r, existing); err != nil {
 		httputil.Error(w, err)
 		return
 	}
 
-	httputil.JSON(w, http.StatusOK, emp)
+	existing.ID = id // Ensure ID can't be changed via request body
+
+	if err := h.service.Update(r.Context(), existing); err != nil {
+		httputil.Error(w, err)
+		return
+	}
+
+	httputil.JSON(w, http.StatusOK, existing)
 }
 
 // Delete deletes an employee
@@ -268,4 +359,126 @@ func strPtr(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// ============================================================================
+// CREDENTIAL MANAGEMENT
+// ============================================================================
+
+// AddCredentialsRequest is the request structure for adding credentials to an employee
+type AddCredentialsRequest struct {
+	Password string `json:"password" validate:"required,min=8"`
+	Role     string `json:"role" validate:"required"`
+}
+
+// AddCredentials creates user credentials for an existing employee
+// POST /employees/{id}/credentials
+func (h *EmployeeHandler) AddCredentials(w http.ResponseWriter, r *http.Request) {
+	employeeID := chi.URLParam(r, "id")
+
+	var req AddCredentialsRequest
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.Error(w, err)
+		return
+	}
+
+	// Validate password length
+	if len(req.Password) < 8 {
+		httputil.Error(w, errors.BadRequest("password must be at least 8 characters"))
+		return
+	}
+
+	// Set default role if not provided
+	if req.Role == "" {
+		req.Role = "staff"
+	}
+
+	// Get actor ID from request headers (set by API Gateway from JWT)
+	actorID := r.Header.Get("X-User-ID")
+	if actorID == "" {
+		httputil.Error(w, errors.Unauthorized("missing user context"))
+		return
+	}
+
+	h.logger.Info().
+		Str("employee_id", employeeID).
+		Str("role", req.Role).
+		Str("actor_id", actorID).
+		Msg("adding credentials to employee")
+
+	result, err := h.service.AddCredentialsToEmployee(r.Context(), employeeID, req.Password, req.Role, actorID)
+	if err != nil {
+		h.logger.Error().Err(err).
+			Str("employee_id", employeeID).
+			Msg("failed to add credentials to employee")
+		httputil.Error(w, err)
+		return
+	}
+
+	h.logger.Info().
+		Str("employee_id", employeeID).
+		Str("user_id", result.UserID).
+		Msg("credentials added successfully")
+
+	httputil.Created(w, result)
+}
+
+// RemoveCredentialsRequest is the optional request structure for removing credentials
+type RemoveCredentialsRequest struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+// RemoveCredentials removes user credentials from an employee
+// DELETE /employees/{id}/credentials
+func (h *EmployeeHandler) RemoveCredentials(w http.ResponseWriter, r *http.Request) {
+	employeeID := chi.URLParam(r, "id")
+
+	// Parse optional reason from request body (may be empty)
+	var req RemoveCredentialsRequest
+	_ = httputil.DecodeJSON(r, &req) // Ignore decode errors, reason is optional
+
+	// Get actor ID from request headers
+	actorID := r.Header.Get("X-User-ID")
+	if actorID == "" {
+		httputil.Error(w, errors.Unauthorized("missing user context"))
+		return
+	}
+
+	h.logger.Info().
+		Str("employee_id", employeeID).
+		Str("actor_id", actorID).
+		Str("reason", req.Reason).
+		Msg("removing credentials from employee")
+
+	err := h.service.RemoveCredentialsFromEmployee(r.Context(), employeeID, actorID, req.Reason)
+	if err != nil {
+		h.logger.Error().Err(err).
+			Str("employee_id", employeeID).
+			Msg("failed to remove credentials from employee")
+		httputil.Error(w, err)
+		return
+	}
+
+	h.logger.Info().
+		Str("employee_id", employeeID).
+		Msg("credentials removed successfully")
+
+	httputil.NoContent(w)
+}
+
+// GetCredentialStatus gets the credential status for an employee
+// GET /employees/{id}/credentials
+func (h *EmployeeHandler) GetCredentialStatus(w http.ResponseWriter, r *http.Request) {
+	employeeID := chi.URLParam(r, "id")
+
+	status, err := h.service.GetCredentialStatus(r.Context(), employeeID)
+	if err != nil {
+		h.logger.Error().Err(err).
+			Str("employee_id", employeeID).
+			Msg("failed to get credential status")
+		httputil.Error(w, err)
+		return
+	}
+
+	httputil.JSON(w, http.StatusOK, status)
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -49,8 +50,9 @@ func NewAuthService(
 
 // LoginRequest represents a login request
 type LoginRequest struct {
-	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required,min=6"`
+	Identifier string  `json:"identifier" validate:"required,min=1"` // Email or username
+	Password   string  `json:"password" validate:"required,min=6"`
+	TenantSlug *string `json:"tenant_slug,omitempty"` // From subdomain (required for username login)
 }
 
 // LoginResponse represents a login response
@@ -86,8 +88,8 @@ func (u *UserInfo) FullName() string {
 
 // Login authenticates a user and returns tokens
 func (s *AuthService) Login(ctx context.Context, req *LoginRequest, userAgent, ipAddress string) (*LoginResponse, error) {
-	// Call user service to validate credentials
-	user, err := s.validateCredentials(ctx, req.Email, req.Password)
+	// Call user service to validate credentials (identifier can be email or username)
+	user, err := s.validateCredentials(ctx, req.Identifier, req.Password, req.TenantSlug)
 	if err != nil {
 		return nil, err
 	}
@@ -203,30 +205,76 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, userID, tenantID, tena
 	return s.getUserInfo(ctx, userID, tenantID, tenantSlug, tenantSchema)
 }
 
+// isEmail checks if the identifier looks like an email address
+func isEmail(identifier string) bool {
+	return strings.Contains(identifier, "@")
+}
+
 // validateCredentials validates user credentials against user service
-// Uses the user-tenant lookup table for O(1) tenant resolution
-func (s *AuthService) validateCredentials(ctx context.Context, email, password string) (*UserInfo, error) {
-	// Step 1: O(1) tenant lookup using the user-tenant lookup table
-	lookup, err := s.lookupRepo.GetByEmail(ctx, email)
-	if err != nil {
-		s.logger.Debug().Str("email", email).Msg("email not found in lookup table")
-		// Return generic invalid credentials to avoid email enumeration
-		return nil, errors.InvalidCredentials()
+// Supports both email and username login:
+// - Email: Uses O(1) lookup table for tenant resolution (tenant_slug optional but validated if provided)
+// - Username: Requires tenant_slug from subdomain since username is only unique within tenant
+func (s *AuthService) validateCredentials(ctx context.Context, identifier, password string, tenantSlug *string) (*UserInfo, error) {
+	var lookup *repository.UserTenantLookup
+	var err error
+
+	if isEmail(identifier) {
+		// O(1) tenant lookup using the user-tenant lookup table
+		lookup, err = s.lookupRepo.GetByEmail(ctx, identifier)
+		if err != nil {
+			s.logger.Debug().Str("email", identifier).Msg("email not found in lookup table")
+			return nil, errors.InvalidCredentials()
+		}
+
+		// If tenant_slug was provided (from subdomain), validate it matches
+		if tenantSlug != nil && *tenantSlug != "" && *tenantSlug != lookup.TenantSlug {
+			s.logger.Debug().
+				Str("email", identifier).
+				Str("expected_tenant", *tenantSlug).
+				Str("actual_tenant", lookup.TenantSlug).
+				Msg("tenant mismatch: email belongs to different tenant")
+			return nil, errors.BadRequest("tenant_mismatch")
+		}
+
+		s.logger.Debug().
+			Str("email", identifier).
+			Str("tenant_id", lookup.TenantID).
+			Str("tenant_schema", lookup.TenantSchema).
+			Msg("tenant resolved from lookup table (email)")
+	} else {
+		// Username login: REQUIRES tenant_slug from subdomain
+		// Username is only unique within a tenant (e.g., "admin" exists in many clinics)
+		if tenantSlug == nil || *tenantSlug == "" {
+			s.logger.Debug().
+				Str("username", identifier).
+				Msg("username login attempted without tenant_slug (subdomain required)")
+			return nil, errors.BadRequest("username_requires_subdomain")
+		}
+
+		// Lookup by username AND tenant slug
+		lookup, err = s.lookupRepo.GetByUsernameAndSlug(ctx, identifier, *tenantSlug)
+		if err != nil {
+			s.logger.Debug().
+				Str("username", identifier).
+				Str("tenant_slug", *tenantSlug).
+				Msg("username not found in tenant")
+			return nil, errors.InvalidCredentials()
+		}
+
+		s.logger.Debug().
+			Str("username", identifier).
+			Str("tenant_id", lookup.TenantID).
+			Str("tenant_schema", lookup.TenantSchema).
+			Msg("tenant resolved from lookup table (username + tenant_slug)")
 	}
 
-	s.logger.Debug().
-		Str("email", email).
-		Str("tenant_id", lookup.TenantID).
-		Str("tenant_schema", lookup.TenantSchema).
-		Msg("tenant resolved from lookup table")
-
-	// Step 2: Call user service WITH tenant headers for tenant-scoped validation
+	// Call user service WITH tenant headers for tenant-scoped validation
 	url := fmt.Sprintf("%s/api/v1/internal/validate-credentials", s.config.Services.UserServiceURL)
 
 	requestBody := struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}{Email: email, Password: password}
+		Identifier string `json:"identifier"` // Can be email or username
+		Password   string `json:"password"`
+	}{Identifier: identifier, Password: password}
 
 	bodyBytes, err := json.Marshal(requestBody)
 	if err != nil {

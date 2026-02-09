@@ -18,7 +18,7 @@ type TimeEntry struct {
 	EmployeeID        string     `db:"employee_id" json:"employee_id"`
 	EntryDate         time.Time  `db:"entry_date" json:"entry_date"`
 	ClockIn           time.Time  `db:"clock_in" json:"clock_in"`
-	ClockOut          *time.Time `db:"clock_out" json:"clock_out,omitempty"`
+	ClockOut          *time.Time `db:"clock_out" json:"clock_out"`
 	TotalWorkMinutes  int        `db:"total_work_minutes" json:"total_work_minutes"`
 	TotalBreakMinutes int        `db:"total_break_minutes" json:"total_break_minutes"`
 	Notes             *string    `db:"notes" json:"notes,omitempty"`
@@ -31,6 +31,9 @@ type TimeEntry struct {
 
 	// Joined fields (populated by specific queries)
 	EmployeeName *string `db:"employee_name" json:"employee_name,omitempty"`
+
+	// Populated by service layer (not from DB scan)
+	Breaks []*TimeBreak `db:"-" json:"breaks"`
 }
 
 // TimeBreak represents a break within a time entry
@@ -66,14 +69,19 @@ type TimeCorrection struct {
 
 // EmployeeTimeStatus represents the current time tracking status of an employee
 type EmployeeTimeStatus struct {
-	EmployeeID    string     `json:"employee_id"`
-	EmployeeName  string     `json:"employee_name"`
-	Status        string     `json:"status"` // clocked_out, clocked_in, on_break
-	TimeEntryID   *string    `json:"time_entry_id,omitempty"`
-	ClockIn       *time.Time `json:"clock_in,omitempty"`
-	BreakStart    *time.Time `json:"break_start,omitempty"`
-	TodayMinutes  int        `json:"today_minutes"`
-	WeekMinutes   int        `json:"week_minutes"`
+	EmployeeID          string     `json:"employee_id"`
+	EmployeeName        string     `json:"employee_name"`
+	EmployeeRole        string     `json:"employee_role"`
+	Avatar              string     `json:"avatar"`
+	Status              string     `json:"status"` // clocked_out, clocked_in, on_break
+	TimeEntryID         *string    `json:"time_entry_id,omitempty"`
+	ClockIn             *time.Time `json:"clock_in,omitempty"`
+	BreakStart          *time.Time `json:"break_start,omitempty"`
+	TodayWorkMinutes    int        `json:"today_work_minutes"`
+	TodayBreakMinutes   int        `json:"today_break_minutes"`
+	WeekTotalMinutes    int        `json:"week_total_minutes"`
+	TargetWeeklyMinutes int        `json:"target_weekly_minutes"`
+	CurrentEntry        *TimeEntry `json:"current_entry,omitempty"`
 }
 
 // TimePeriodSummary represents time tracking summary for a period
@@ -458,6 +466,45 @@ func (r *TimeTrackingRepository) ListBreaksForEntry(ctx context.Context, timeEnt
 	return breaks, nil
 }
 
+// DeleteBreaksForEntry deletes all breaks for a time entry
+// TENANT-ISOLATED: Deletes only in the tenant's schema
+func (r *TimeTrackingRepository) DeleteBreaksForEntry(ctx context.Context, timeEntryID string) error {
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
+		return err
+	}
+
+	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		query := `DELETE FROM time_breaks WHERE time_entry_id = $1`
+		_, err := r.db.ExecContext(ctx, query, timeEntryID)
+		return err
+	})
+}
+
+// DeleteBreak deletes a single break
+// TENANT-ISOLATED: Deletes only in the tenant's schema
+func (r *TimeTrackingRepository) DeleteBreak(ctx context.Context, breakID string) error {
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
+		return err
+	}
+
+	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		query := `DELETE FROM time_breaks WHERE id = $1`
+		result, err := r.db.ExecContext(ctx, query, breakID)
+		if err != nil {
+			return err
+		}
+
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			return errors.NotFound("time_break")
+		}
+
+		return nil
+	})
+}
+
 // CalculateTotalBreakMinutes calculates total break minutes for a time entry
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *TimeTrackingRepository) CalculateTotalBreakMinutes(ctx context.Context, timeEntryID string) (int, error) {
@@ -565,22 +612,35 @@ func (r *TimeTrackingRepository) GetAllEmployeeStatuses(ctx context.Context) ([]
 	var statuses []*EmployeeTimeStatus
 
 	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
-		// Get all active employees
+		// Get all active employees with today's latest time entry (active or completed)
 		query := `
 			SELECT
 				e.id as employee_id,
 				CONCAT(e.first_name, ' ', e.last_name) as employee_name,
+				COALESCE(e.job_title, '') as employee_role,
+				COALESCE(e.avatar_url, '') as avatar,
 				te.id as time_entry_id,
 				te.clock_in,
+				te.clock_out,
 				tb.start_time as break_start,
-				COALESCE(today.total_work_minutes, 0) as today_minutes,
-				COALESCE(week.total_work_minutes, 0) as week_minutes
+				COALESCE(today.total_work_minutes, 0) as today_work_minutes,
+				COALESCE(today.total_break_minutes, 0) as today_break_minutes,
+				COALESCE(week.total_work_minutes, 0) as week_total_minutes
 			FROM employees e
-			LEFT JOIN time_entries te ON e.id = te.employee_id
-				AND te.clock_out IS NULL AND te.deleted_at IS NULL
+			LEFT JOIN LATERAL (
+				SELECT id, clock_in, clock_out
+				FROM time_entries
+				WHERE employee_id = e.id
+					AND entry_date = CURRENT_DATE
+					AND deleted_at IS NULL
+				ORDER BY clock_in DESC
+				LIMIT 1
+			) te ON true
 			LEFT JOIN time_breaks tb ON te.id = tb.time_entry_id AND tb.end_time IS NULL
 			LEFT JOIN LATERAL (
-				SELECT SUM(total_work_minutes) as total_work_minutes
+				SELECT
+					SUM(total_work_minutes) as total_work_minutes,
+					SUM(total_break_minutes) as total_break_minutes
 				FROM time_entries
 				WHERE employee_id = e.id
 					AND entry_date = CURRENT_DATE
@@ -599,13 +659,17 @@ func (r *TimeTrackingRepository) GetAllEmployeeStatuses(ctx context.Context) ([]
 		`
 
 		type statusRow struct {
-			EmployeeID   string     `db:"employee_id"`
-			EmployeeName string     `db:"employee_name"`
-			TimeEntryID  *string    `db:"time_entry_id"`
-			ClockIn      *time.Time `db:"clock_in"`
-			BreakStart   *time.Time `db:"break_start"`
-			TodayMinutes int        `db:"today_minutes"`
-			WeekMinutes  int        `db:"week_minutes"`
+			EmployeeID        string     `db:"employee_id"`
+			EmployeeName      string     `db:"employee_name"`
+			EmployeeRole      string     `db:"employee_role"`
+			Avatar            string     `db:"avatar"`
+			TimeEntryID       *string    `db:"time_entry_id"`
+			ClockIn           *time.Time `db:"clock_in"`
+			ClockOut          *time.Time `db:"clock_out"`
+			BreakStart        *time.Time `db:"break_start"`
+			TodayWorkMinutes  int        `db:"today_work_minutes"`
+			TodayBreakMinutes int        `db:"today_break_minutes"`
+			WeekTotalMinutes  int        `db:"week_total_minutes"`
 		}
 
 		var rows []statusRow
@@ -615,17 +679,23 @@ func (r *TimeTrackingRepository) GetAllEmployeeStatuses(ctx context.Context) ([]
 
 		for _, row := range rows {
 			status := &EmployeeTimeStatus{
-				EmployeeID:   row.EmployeeID,
-				EmployeeName: row.EmployeeName,
-				TimeEntryID:  row.TimeEntryID,
-				ClockIn:      row.ClockIn,
-				BreakStart:   row.BreakStart,
-				TodayMinutes: row.TodayMinutes,
-				WeekMinutes:  row.WeekMinutes,
+				EmployeeID:          row.EmployeeID,
+				EmployeeName:        row.EmployeeName,
+				EmployeeRole:        row.EmployeeRole,
+				Avatar:              row.Avatar,
+				TimeEntryID:         row.TimeEntryID,
+				ClockIn:             row.ClockIn,
+				BreakStart:          row.BreakStart,
+				TodayWorkMinutes:    row.TodayWorkMinutes,
+				TodayBreakMinutes:   row.TodayBreakMinutes,
+				WeekTotalMinutes:    row.WeekTotalMinutes,
+				TargetWeeklyMinutes: 2400, // 40h/week default
 			}
 
 			// Determine status
 			if row.TimeEntryID == nil {
+				status.Status = "clocked_out"
+			} else if row.ClockOut != nil {
 				status.Status = "clocked_out"
 			} else if row.BreakStart != nil {
 				status.Status = "on_break"

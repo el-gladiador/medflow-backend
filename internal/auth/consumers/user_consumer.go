@@ -106,6 +106,7 @@ func (h *UserEventHandler) handleUserCreated(ctx context.Context, event *messagi
 
 	lookup := &repository.UserTenantLookup{
 		Email:        data.Email,
+		Username:     data.Username,
 		UserID:       data.UserID,
 		TenantID:     data.TenantID,
 		TenantSlug:   data.TenantSlug,

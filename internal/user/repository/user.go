@@ -43,14 +43,15 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
 
 	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
 		query := `
-			INSERT INTO users (id, email, password_hash, first_name, last_name, avatar_url, status)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			INSERT INTO users (id, email, username, password_hash, first_name, last_name, avatar_url, status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 			RETURNING created_at, updated_at
 		`
 
 		return r.db.QueryRowxContext(ctx, query,
 			user.ID,
 			user.Email,
+			user.Username,
 			user.PasswordHash,
 			user.FirstName,
 			user.LastName,
@@ -71,15 +72,16 @@ func (r *UserRepository) GetByID(ctx context.Context, id string) (*domain.User, 
 	var user domain.User
 	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
 		query := `
-			SELECT id, email, password_hash, first_name, last_name, avatar_url, status,
+			SELECT id, email, username, password_hash, first_name, last_name, avatar_url, status,
 			       created_at, updated_at, last_login_at, deleted_at
 			FROM users
 			WHERE id = $1 AND deleted_at IS NULL
 		`
 		var avatarURL sql.NullString
+		var username sql.NullString
 
 		err := r.db.QueryRowContext(ctx, query, id).Scan(
-			&user.ID, &user.Email, &user.PasswordHash,
+			&user.ID, &user.Email, &username, &user.PasswordHash,
 			&user.FirstName, &user.LastName, &avatarURL, &user.Status,
 			&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt, &user.DeletedAt,
 		)
@@ -89,6 +91,9 @@ func (r *UserRepository) GetByID(ctx context.Context, id string) (*domain.User, 
 
 		if avatarURL.Valid {
 			user.AvatarURL = &avatarURL.String
+		}
+		if username.Valid {
+			user.Username = &username.String
 		}
 
 		return nil
@@ -115,15 +120,16 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.
 	var user domain.User
 	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
 		query := `
-			SELECT id, email, password_hash, first_name, last_name, avatar_url, status,
+			SELECT id, email, username, password_hash, first_name, last_name, avatar_url, status,
 			       created_at, updated_at, last_login_at, deleted_at
 			FROM users
 			WHERE email = $1 AND deleted_at IS NULL
 		`
 		var avatarURL sql.NullString
+		var username sql.NullString
 
 		err := r.db.QueryRowContext(ctx, query, email).Scan(
-			&user.ID, &user.Email, &user.PasswordHash,
+			&user.ID, &user.Email, &username, &user.PasswordHash,
 			&user.FirstName, &user.LastName, &avatarURL, &user.Status,
 			&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt, &user.DeletedAt,
 		)
@@ -133,6 +139,57 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.
 
 		if avatarURL.Valid {
 			user.AvatarURL = &avatarURL.String
+		}
+		if username.Valid {
+			user.Username = &username.String
+		}
+
+		return nil
+	})
+
+	if err == sql.ErrNoRows {
+		return nil, errors.NotFound("user")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+// GetByUsername gets a user by username
+// TENANT-ISOLATED: Queries only the tenant's schema
+func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var user domain.User
+	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		query := `
+			SELECT id, email, username, password_hash, first_name, last_name, avatar_url, status,
+			       created_at, updated_at, last_login_at, deleted_at
+			FROM users
+			WHERE username = $1 AND deleted_at IS NULL
+		`
+		var avatarURL sql.NullString
+		var usernameDB sql.NullString
+
+		err := r.db.QueryRowContext(ctx, query, username).Scan(
+			&user.ID, &user.Email, &usernameDB, &user.PasswordHash,
+			&user.FirstName, &user.LastName, &avatarURL, &user.Status,
+			&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt, &user.DeletedAt,
+		)
+		if err != nil {
+			return err
+		}
+
+		if avatarURL.Valid {
+			user.AvatarURL = &avatarURL.String
+		}
+		if usernameDB.Valid {
+			user.Username = &usernameDB.String
 		}
 
 		return nil
@@ -563,6 +620,32 @@ func (r *UserRepository) GetUserWithRoleFromJunction(ctx context.Context, userID
 	return &user, nil
 }
 
+// AssignRole assigns a role to a user via the user_roles junction table
+// TENANT-ISOLATED: Inserts only into the tenant's schema
+func (r *UserRepository) AssignRole(ctx context.Context, userID, roleID string) error {
+	tenantSchema, err := tenant.TenantSchema(ctx)
+	if err != nil {
+		return err
+	}
+
+	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+		// First, remove any existing role assignments for this user
+		_, err := r.db.ExecContext(ctx, `DELETE FROM user_roles WHERE user_id = $1`, userID)
+		if err != nil {
+			return fmt.Errorf("failed to clear existing roles: %w", err)
+		}
+
+		// Insert the new role assignment
+		query := `INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)`
+		_, err = r.db.ExecContext(ctx, query, userID, roleID)
+		if err != nil {
+			return fmt.Errorf("failed to assign role: %w", err)
+		}
+
+		return nil
+	})
+}
+
 // FindUserAcrossTenants searches all active tenant schemas for a user by email.
 // This is used ONLY during login to determine which tenant owns the email.
 // Returns the user and the tenant information.
@@ -604,7 +687,7 @@ func (r *UserRepository) FindUserAcrossTenants(ctx context.Context, email string
 	for _, tenantInfo := range tenants {
 		// Query the tenant's schema for this email
 		userQuery := fmt.Sprintf(`
-			SELECT id, email, password_hash, first_name, last_name, avatar_url, status,
+			SELECT id, email, username, password_hash, first_name, last_name, avatar_url, status,
 			       created_at, updated_at, last_login_at
 			FROM %s.users
 			WHERE email = $1 AND deleted_at IS NULL AND status = 'active'
@@ -613,10 +696,12 @@ func (r *UserRepository) FindUserAcrossTenants(ctx context.Context, email string
 
 		var user domain.User
 		var avatarURL sql.NullString
+		var username sql.NullString
 
 		err := r.db.QueryRowContext(ctx, userQuery, email).Scan(
 			&user.ID,
 			&user.Email,
+			&username,
 			&user.PasswordHash,
 			&user.FirstName,
 			&user.LastName,
@@ -631,6 +716,9 @@ func (r *UserRepository) FindUserAcrossTenants(ctx context.Context, email string
 			// Found the user in this tenant
 			if avatarURL.Valid {
 				user.AvatarURL = &avatarURL.String
+			}
+			if username.Valid {
+				user.Username = &username.String
 			}
 			return &user, &tenantInfo, nil
 		}

@@ -43,6 +43,7 @@ func (p *UserEventPublisher) PublishUserCreated(ctx context.Context, user *domai
 	data := messaging.UserCreatedEvent{
 		UserID:       user.ID,
 		Email:        user.Email,
+		Username:     user.Username,
 		FirstName:    user.FirstName,
 		LastName:     user.LastName,
 		RoleName:     roleName,
