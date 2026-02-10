@@ -30,7 +30,7 @@ func NewVLMProcessor(visionURL string) *VLMProcessor {
 	return &VLMProcessor{
 		visionURL: visionURL,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second, // Vision inference can take 10-20s
+			Timeout: 10 * time.Minute, // Vision inference varies by GPU (10s on RTX 3060, ~7min on T500)
 		},
 	}
 }

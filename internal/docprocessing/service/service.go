@@ -31,12 +31,13 @@ func NewService(registry *processor.Registry, store *storage.TempStorage, db *da
 	}
 }
 
-// StartExtraction creates a new extraction job, processes the document, and stores the result.
+// StartExtraction creates a new extraction job and processes the document asynchronously.
+// Returns the job immediately so the caller can poll for results.
 // Image bytes are zeroed immediately after processing.
 func (s *Service) StartExtraction(ctx context.Context, imageData []byte, docType domain.DocumentType, consentTimestamp time.Time, userID string) (*domain.ExtractionJob, error) {
 	jobID := storage.GenerateJobID()
 
-	// Create job in pending state
+	// Create job in processing state
 	job := &domain.ExtractionJob{
 		JobID:     jobID,
 		Status:    domain.StatusProcessing,
@@ -55,6 +56,17 @@ func (s *Service) StartExtraction(ctx context.Context, imageData []byte, docType
 		return s.storage.GetJob(jobID), nil
 	}
 
+	// Process asynchronously — return job ID immediately for polling
+	go s.processAsync(ctx, jobID, imageData, docType, processors, consentTimestamp, userID)
+
+	return s.storage.GetJob(jobID), nil
+}
+
+// processAsync runs extraction in a background goroutine.
+func (s *Service) processAsync(ctx context.Context, jobID string, imageData []byte, docType domain.DocumentType, processors []processor.Processor, consentTimestamp time.Time, userID string) {
+	// Use a detached context so the request cancellation doesn't kill processing
+	bgCtx := context.Background()
+
 	// Try processors in order; if one fails, fall through to the next
 	var result *domain.ExtractionResult
 	var lastErr error
@@ -65,7 +77,7 @@ func (s *Service) StartExtraction(ctx context.Context, imageData []byte, docType
 			Str("doc_type", string(docType)).
 			Msg("trying document extraction")
 
-		result, lastErr = proc.Process(ctx, imageData, docType)
+		result, lastErr = proc.Process(bgCtx, imageData, docType)
 		if lastErr == nil {
 			s.log.Info().
 				Str("job_id", jobID).
@@ -89,7 +101,7 @@ func (s *Service) StartExtraction(ctx context.Context, imageData []byte, docType
 			j.Error = lastErr.Error()
 		})
 		s.log.Error().Err(lastErr).Str("job_id", jobID).Msg("all processors failed")
-		return s.storage.GetJob(jobID), nil
+		return
 	}
 
 	// Update job with results
@@ -99,15 +111,13 @@ func (s *Service) StartExtraction(ctx context.Context, imageData []byte, docType
 	})
 
 	// Write audit log (async, non-blocking)
-	go s.writeAuditLog(ctx, docType, consentTimestamp, userID, result, imageDeletedAt)
+	go s.writeAuditLog(bgCtx, docType, consentTimestamp, userID, result, imageDeletedAt)
 
 	s.log.Info().
 		Str("job_id", jobID).
 		Int("fields_extracted", len(result.Fields)).
 		Int64("duration_ms", result.ProcessingTimeMs).
 		Msg("document extraction completed")
-
-	return s.storage.GetJob(jobID), nil
 }
 
 // GetJob retrieves an extraction job by ID

@@ -192,7 +192,7 @@ services:
               count: 1
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD", "ollama", "list"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -202,7 +202,7 @@ services:
   # Vision Service (Python - document extraction via Ollama)
   vision-service:
     build:
-      context: ../../services/vision-service
+      context: ../services/vision-service
       dockerfile: Dockerfile
     container_name: medflow-vision-service
     environment:
