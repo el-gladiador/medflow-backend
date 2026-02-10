@@ -125,6 +125,18 @@ services:
         condition: service_healthy
     networks:
       - medflow-network
+    develop:
+      watch:
+        - action: rebuild
+          path: ../cmd/auth-service
+        - action: rebuild
+          path: ../internal/auth
+        - action: rebuild
+          path: ../pkg
+        - action: rebuild
+          path: ../migrations/auth
+        - action: rebuild
+          path: ../go.mod
 
   # User Service
   user-service:
@@ -151,6 +163,64 @@ services:
         condition: service_healthy
     networks:
       - medflow-network
+    develop:
+      watch:
+        - action: rebuild
+          path: ../cmd/user-service
+        - action: rebuild
+          path: ../internal/user
+        - action: rebuild
+          path: ../pkg
+        - action: rebuild
+          path: ../migrations/user
+        - action: rebuild
+          path: ../go.mod
+
+  # Ollama (AI model server for document vision extraction)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: medflow-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - medflow-network
+
+  # Vision Service (Python - document extraction via Ollama)
+  vision-service:
+    build:
+      context: ../../services/vision-service
+      dockerfile: Dockerfile
+    container_name: medflow-vision-service
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=moondream
+      - PORT=8090
+    ports:
+      - "8090:8090"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - medflow-network
 
   # Staff Service
   staff-service:
@@ -169,6 +239,7 @@ services:
       - MEDFLOW_RABBITMQ_URL=amqp://medflow:${RABBITMQ_PASSWORD:-devpassword}@rabbitmq:5672/
       - MEDFLOW_JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
       - USER_SERVICE_URL=http://user-service:8082
+      - VISION_SERVICE_URL=http://vision-service:8090
     ports:
       - "8083:8083"
     depends_on:
@@ -176,8 +247,22 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      vision-service:
+        condition: service_healthy
     networks:
       - medflow-network
+    develop:
+      watch:
+        - action: rebuild
+          path: ../cmd/staff-service
+        - action: rebuild
+          path: ../internal/staff
+        - action: rebuild
+          path: ../pkg
+        - action: rebuild
+          path: ../migrations/staff
+        - action: rebuild
+          path: ../go.mod
 
   # Inventory Service
   inventory-service:
@@ -204,6 +289,18 @@ services:
         condition: service_healthy
     networks:
       - medflow-network
+    develop:
+      watch:
+        - action: rebuild
+          path: ../cmd/inventory-service
+        - action: rebuild
+          path: ../internal/inventory
+        - action: rebuild
+          path: ../pkg
+        - action: rebuild
+          path: ../migrations/inventory
+        - action: rebuild
+          path: ../go.mod
 
   # API Gateway
   api-gateway:
@@ -228,6 +325,16 @@ services:
       - inventory-service
     networks:
       - medflow-network
+    develop:
+      watch:
+        - action: rebuild
+          path: ../cmd/api-gateway
+        - action: rebuild
+          path: ../internal/gateway
+        - action: rebuild
+          path: ../pkg
+        - action: rebuild
+          path: ../go.mod
 
 networks:
   medflow-network:
@@ -239,3 +346,4 @@ volumes:
   postgres-users-data:
   postgres-staff-data:
   postgres-inventory-data:
+  ollama-data:

@@ -11,6 +11,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	dochandler "github.com/medflow/medflow-backend/internal/docprocessing/handler"
+	docprocessor "github.com/medflow/medflow-backend/internal/docprocessing/processor"
+	docservice "github.com/medflow/medflow-backend/internal/docprocessing/service"
+	"github.com/medflow/medflow-backend/internal/docprocessing/storage"
 	"github.com/medflow/medflow-backend/internal/staff/client"
 	"github.com/medflow/medflow-backend/internal/staff/consumers"
 	"github.com/medflow/medflow-backend/internal/staff/events"
@@ -92,6 +96,21 @@ func main() {
 	absenceHandler := handler.NewAbsenceHandler(absenceService, log)
 	timeTrackingHandler := handler.NewTimeTrackingHandler(timeTrackingService, staffService, log)
 	complianceHandler := handler.NewComplianceHandler(complianceService, staffService, log)
+
+	// Initialize document processing
+	visionServiceURL := os.Getenv("VISION_SERVICE_URL")
+	if visionServiceURL == "" {
+		visionServiceURL = "http://localhost:8090"
+	}
+	processorRegistry := docprocessor.NewRegistry(
+		docprocessor.NewVLMProcessor(visionServiceURL), // VLM first (handles images)
+		docprocessor.NewMRZProcessor(),                  // MRZ fallback (handles text)
+		docprocessor.NewLicenseProcessor(),
+		docprocessor.NewCVProcessor(),
+	)
+	tempStorage := storage.NewTempStorage(10 * time.Minute)
+	docProcessingService := docservice.NewService(processorRegistry, tempStorage, db, log)
+	docProcessingHandler := dochandler.NewHandler(docProcessingService, log)
 
 	// Start user event consumer
 	userConsumer, err := consumers.NewUserEventConsumer(rmq, userCacheRepo, employeeRepo, staffService, log)
@@ -211,6 +230,12 @@ func main() {
 		r.Post("/validate/iban", validationHandler.ValidateIBAN)
 		r.Post("/validate/tax-id", validationHandler.ValidateTaxID)
 		r.Post("/validate/sv-number", validationHandler.ValidateSVNumber)
+
+		// Document processing routes (for smart employee onboarding)
+		r.Route("/documents", func(r chi.Router) {
+			r.Post("/extract", docProcessingHandler.Extract)
+			r.Get("/extract/{jobId}", docProcessingHandler.GetResult)
+		})
 	})
 
 	// Time Tracking routes (under /api/v1/time-tracking)

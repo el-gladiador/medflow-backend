@@ -189,6 +189,12 @@ func main() {
 				r.Post("/validate/iban", proxy.ForwardToStaff)
 				r.Post("/validate/tax-id", proxy.ForwardToStaff)
 				r.Post("/validate/sv-number", proxy.ForwardToStaff)
+
+				// Document processing routes (smart employee onboarding)
+				r.Route("/documents", func(r chi.Router) {
+					r.Post("/extract", proxy.ForwardToStaff)
+					r.Get("/extract/{jobId}", proxy.ForwardToStaff)
+				})
 			})
 
 			// Time Tracking routes
