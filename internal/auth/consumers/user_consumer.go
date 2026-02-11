@@ -89,7 +89,7 @@ func (h *UserEventHandler) handleUserCreated(ctx context.Context, event *messagi
 	}
 
 	// Validate required tenant fields
-	if data.TenantID == "" || data.TenantSchema == "" {
+	if data.TenantID == "" {
 		h.logger.Warn().
 			Str("user_id", data.UserID).
 			Str("email", data.Email).
@@ -101,16 +101,14 @@ func (h *UserEventHandler) handleUserCreated(ctx context.Context, event *messagi
 		Str("user_id", data.UserID).
 		Str("email", data.Email).
 		Str("tenant_id", data.TenantID).
-		Str("tenant_schema", data.TenantSchema).
 		Msg("syncing user to lookup table")
 
 	lookup := &repository.UserTenantLookup{
-		Email:        data.Email,
-		Username:     data.Username,
-		UserID:       data.UserID,
-		TenantID:     data.TenantID,
-		TenantSlug:   data.TenantSlug,
-		TenantSchema: data.TenantSchema,
+		Email:      data.Email,
+		Username:   data.Username,
+		UserID:     data.UserID,
+		TenantID:   data.TenantID,
+		TenantSlug: data.TenantSlug,
 	}
 
 	if err := h.lookupRepo.Upsert(ctx, lookup); err != nil {
@@ -147,7 +145,7 @@ func (h *UserEventHandler) handleUserUpdated(ctx context.Context, event *messagi
 	}
 
 	// Validate required tenant fields
-	if data.TenantID == "" || data.TenantSchema == "" {
+	if data.TenantID == "" {
 		h.logger.Warn().
 			Str("user_id", data.UserID).
 			Msg("user.updated event missing tenant context, skipping lookup table update")
@@ -172,11 +170,10 @@ func (h *UserEventHandler) handleUserUpdated(ctx context.Context, event *messagi
 
 	// Create new entry with updated email
 	lookup := &repository.UserTenantLookup{
-		Email:        *data.NewEmail,
-		UserID:       data.UserID,
-		TenantID:     data.TenantID,
-		TenantSlug:   data.TenantSlug,
-		TenantSchema: data.TenantSchema,
+		Email:      *data.NewEmail,
+		UserID:     data.UserID,
+		TenantID:   data.TenantID,
+		TenantSlug: data.TenantSlug,
 	}
 
 	if err := h.lookupRepo.Upsert(ctx, lookup); err != nil {

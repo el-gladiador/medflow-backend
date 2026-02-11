@@ -127,7 +127,7 @@ func (s *Service) GetJob(jobID string) *domain.ExtractionJob {
 
 // writeAuditLog records the processing event in the tenant's audit table
 func (s *Service) writeAuditLog(ctx context.Context, docType domain.DocumentType, consentTimestamp time.Time, userID string, result *domain.ExtractionResult, imageDeletedAt time.Time) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		s.log.Warn().Err(err).Msg("cannot write audit log: no tenant context")
 		return
@@ -139,11 +139,12 @@ func (s *Service) writeAuditLog(ctx context.Context, docType domain.DocumentType
 		fieldKeys[i] = f.Key
 	}
 
-	err = s.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = s.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `INSERT INTO document_processing_audit
-			(document_type, consent_timestamp, consent_given_by, fields_extracted, processing_duration_ms, image_deleted_at)
-			VALUES ($1, $2, $3, $4, $5, $6)`
+			(tenant_id, document_type, consent_timestamp, consent_given_by, fields_extracted, processing_duration_ms, image_deleted_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)`
 		_, err := s.db.ExecContext(ctx, query,
+			tenantID,
 			string(docType),
 			consentTimestamp,
 			userID,

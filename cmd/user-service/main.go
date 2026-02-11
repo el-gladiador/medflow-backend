@@ -34,24 +34,29 @@ func main() {
 	log := logger.New("user-service", cfg.Server.Environment)
 	log.Info().Msg("starting User Service")
 
-	// Connect to database
-	db, err := database.New(&cfg.Database, log)
+	// Connect to database (single Supabase DB, search_path = users, public)
+	db, err := database.NewWithSearchPath(&cfg.Database, cfg.Database.SearchPath, log)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to connect to database")
 	}
 	defer db.Close()
 
-	// Connect to RabbitMQ
-	rmq, err := messaging.New(&cfg.RabbitMQ, log)
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to connect to RabbitMQ")
+	// Connect to RabbitMQ (optional — nil if unavailable)
+	rmq := messaging.NewOptional(&cfg.RabbitMQ, log)
+	if rmq != nil {
+		defer rmq.Close()
 	}
-	defer rmq.Close()
 
-	// Initialize event publisher
-	publisher, err := events.NewUserEventPublisher(rmq, log)
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to create event publisher")
+	// Initialize event publisher (nil-safe if RabbitMQ is unavailable)
+	var publisher *events.UserEventPublisher
+	if rmq != nil {
+		var err error
+		publisher, err = events.NewUserEventPublisher(rmq, log)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to create event publisher")
+		}
+	} else {
+		log.Warn().Msg("event publishing disabled (no RabbitMQ)")
 	}
 
 	// Initialize repositories
@@ -78,12 +83,17 @@ func main() {
 
 	// Health check (no tenant required)
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		httputil.JSON(w, http.StatusOK, map[string]interface{}{
+		health := map[string]interface{}{
 			"status":   "healthy",
 			"service":  "user-service",
 			"database": db.Health(r.Context()),
-			"rabbitmq": rmq.Health(),
-		})
+		}
+		if rmq != nil {
+			health["rabbitmq"] = rmq.Health()
+		} else {
+			health["rabbitmq"] = map[string]string{"status": "disabled"}
+		}
+		httputil.JSON(w, http.StatusOK, health)
 	})
 
 	// Internal endpoints (no tenant required - used during login to find tenant)

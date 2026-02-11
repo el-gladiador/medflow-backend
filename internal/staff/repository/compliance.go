@@ -171,14 +171,14 @@ func NewComplianceRepository(db *database.DB) *ComplianceRepository {
 
 // GetSettings gets the tenant's compliance settings
 func (r *ComplianceRepository) GetSettings(ctx context.Context) (*ComplianceSettings, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var settings ComplianceSettings
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, min_break_6h_minutes, min_break_9h_minutes, min_break_segment_minutes,
 			       max_daily_hours, target_daily_hours, max_weekly_hours,
@@ -218,12 +218,12 @@ func (r *ComplianceRepository) GetSettings(ctx context.Context) (*ComplianceSett
 
 // UpdateSettings updates the tenant's compliance settings
 func (r *ComplianceRepository) UpdateSettings(ctx context.Context, settings *ComplianceSettings) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE compliance_settings SET
 				min_break_6h_minutes = $1,
@@ -263,7 +263,7 @@ func (r *ComplianceRepository) UpdateSettings(ctx context.Context, settings *Com
 
 // CreateViolation creates a new compliance violation record
 func (r *ComplianceRepository) CreateViolation(ctx context.Context, v *ComplianceViolation) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -275,17 +275,17 @@ func (r *ComplianceRepository) CreateViolation(ctx context.Context, v *Complianc
 		v.Status = "open"
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			INSERT INTO compliance_violations (
-				id, employee_id, violation_type, violation_date,
+				id, tenant_id, employee_id, violation_type, violation_date,
 				time_entry_id, shift_assignment_id, expected_value, actual_value,
 				description, status
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			RETURNING created_at, updated_at
 		`
 		return r.db.QueryRowxContext(ctx, query,
-			v.ID, v.EmployeeID, v.ViolationType, v.ViolationDate,
+			v.ID, tenantID, v.EmployeeID, v.ViolationType, v.ViolationDate,
 			v.TimeEntryID, v.ShiftAssignmentID, v.ExpectedValue, v.ActualValue,
 			v.Description, v.Status,
 		).Scan(&v.CreatedAt, &v.UpdatedAt)
@@ -294,14 +294,14 @@ func (r *ComplianceRepository) CreateViolation(ctx context.Context, v *Complianc
 
 // ListViolations lists violations with filters
 func (r *ComplianceRepository) ListViolations(ctx context.Context, employeeID *string, startDate, endDate *time.Time, status *string) ([]*ComplianceViolation, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var violations []*ComplianceViolation
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT v.id, v.employee_id, v.violation_type, v.violation_date,
 			       v.time_entry_id, v.shift_assignment_id, v.expected_value, v.actual_value,
@@ -349,12 +349,12 @@ func (r *ComplianceRepository) ListViolations(ctx context.Context, employeeID *s
 
 // AcknowledgeViolation marks a violation as acknowledged
 func (r *ComplianceRepository) AcknowledgeViolation(ctx context.Context, id string, acknowledgedBy string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE compliance_violations
 			SET status = 'acknowledged', acknowledged_by = $2, acknowledged_at = NOW()
@@ -378,7 +378,7 @@ func (r *ComplianceRepository) AcknowledgeViolation(ctx context.Context, id stri
 
 // CreateAlert creates a new compliance alert
 func (r *ComplianceRepository) CreateAlert(ctx context.Context, a *ComplianceAlert) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -387,29 +387,29 @@ func (r *ComplianceRepository) CreateAlert(ctx context.Context, a *ComplianceAle
 		a.ID = uuid.New().String()
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			INSERT INTO compliance_alerts (
-				id, employee_id, alert_type, severity, message, action_label, is_active
-			) VALUES ($1, $2, $3, $4, $5, $6, $7)
+				id, tenant_id, employee_id, alert_type, severity, message, action_label, is_active
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 			RETURNING created_at, updated_at
 		`
 		return r.db.QueryRowxContext(ctx, query,
-			a.ID, a.EmployeeID, a.AlertType, a.Severity, a.Message, a.ActionLabel, true,
+			a.ID, tenantID, a.EmployeeID, a.AlertType, a.Severity, a.Message, a.ActionLabel, true,
 		).Scan(&a.CreatedAt, &a.UpdatedAt)
 	})
 }
 
 // ListActiveAlerts lists all active alerts
 func (r *ComplianceRepository) ListActiveAlerts(ctx context.Context) ([]*ComplianceAlert, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var alerts []*ComplianceAlert
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT a.id, a.employee_id, a.alert_type, a.severity, a.message,
 			       a.action_label, a.is_active, a.dismissed_by, a.dismissed_at,
@@ -438,12 +438,12 @@ func (r *ComplianceRepository) ListActiveAlerts(ctx context.Context) ([]*Complia
 
 // DismissAlert dismisses an alert
 func (r *ComplianceRepository) DismissAlert(ctx context.Context, id string, dismissedBy string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE compliance_alerts
 			SET is_active = false, dismissed_by = $2, dismissed_at = NOW()
@@ -456,12 +456,12 @@ func (r *ComplianceRepository) DismissAlert(ctx context.Context, id string, dism
 
 // DeactivateAlertsForEmployee deactivates all alerts for an employee
 func (r *ComplianceRepository) DeactivateAlertsForEmployee(ctx context.Context, employeeID string, alertType string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE compliance_alerts
 			SET is_active = false
@@ -478,7 +478,7 @@ func (r *ComplianceRepository) DeactivateAlertsForEmployee(ctx context.Context, 
 
 // CreateCorrectionRequest creates a new correction request
 func (r *ComplianceRepository) CreateCorrectionRequest(ctx context.Context, req *CorrectionRequest) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -490,16 +490,16 @@ func (r *ComplianceRepository) CreateCorrectionRequest(ctx context.Context, req 
 		req.Status = CorrectionStatusPending
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			INSERT INTO time_correction_requests (
-				id, employee_id, time_entry_id, requested_date,
+				id, tenant_id, employee_id, time_entry_id, requested_date,
 				requested_clock_in, requested_clock_out, request_type, reason, status
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 			RETURNING created_at, updated_at
 		`
 		return r.db.QueryRowxContext(ctx, query,
-			req.ID, req.EmployeeID, req.TimeEntryID, req.RequestedDate,
+			req.ID, tenantID, req.EmployeeID, req.TimeEntryID, req.RequestedDate,
 			req.RequestedClockIn, req.RequestedClockOut, req.RequestType, req.Reason, req.Status,
 		).Scan(&req.CreatedAt, &req.UpdatedAt)
 	})
@@ -507,14 +507,14 @@ func (r *ComplianceRepository) CreateCorrectionRequest(ctx context.Context, req 
 
 // GetCorrectionRequestByID gets a correction request by ID
 func (r *ComplianceRepository) GetCorrectionRequestByID(ctx context.Context, id string) (*CorrectionRequest, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var req CorrectionRequest
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT r.id, r.employee_id, r.time_entry_id, r.requested_date,
 			       r.requested_clock_in, r.requested_clock_out, r.request_type, r.reason,
@@ -542,14 +542,14 @@ func (r *ComplianceRepository) GetCorrectionRequestByID(ctx context.Context, id 
 
 // ListPendingCorrectionRequests lists all pending correction requests
 func (r *ComplianceRepository) ListPendingCorrectionRequests(ctx context.Context) ([]*CorrectionRequest, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var requests []*CorrectionRequest
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT r.id, r.employee_id, r.time_entry_id, r.requested_date,
 			       r.requested_clock_in, r.requested_clock_out, r.request_type, r.reason,
@@ -573,14 +573,14 @@ func (r *ComplianceRepository) ListPendingCorrectionRequests(ctx context.Context
 
 // ListCorrectionRequestsByEmployee lists correction requests for an employee
 func (r *ComplianceRepository) ListCorrectionRequestsByEmployee(ctx context.Context, employeeID string) ([]*CorrectionRequest, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var requests []*CorrectionRequest
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT r.id, r.employee_id, r.time_entry_id, r.requested_date,
 			       r.requested_clock_in, r.requested_clock_out, r.request_type, r.reason,
@@ -604,12 +604,12 @@ func (r *ComplianceRepository) ListCorrectionRequestsByEmployee(ctx context.Cont
 
 // UpdateCorrectionRequestStatus updates the status of a correction request
 func (r *ComplianceRepository) UpdateCorrectionRequestStatus(ctx context.Context, id string, status string, reviewerID string, rejectionReason *string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE time_correction_requests
 			SET status = $2, reviewed_by = $3, reviewed_at = NOW(), rejection_reason = $4

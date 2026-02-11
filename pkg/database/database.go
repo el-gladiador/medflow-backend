@@ -15,7 +15,8 @@ import (
 // DB wraps sqlx.DB with additional functionality
 type DB struct {
 	*sqlx.DB
-	logger *logger.Logger
+	logger     *logger.Logger
+	searchPath string // Service-specific search_path (e.g., "users, public")
 }
 
 // New creates a new database connection
@@ -46,6 +47,39 @@ func NewWithDSN(dsn string, log *logger.Logger) (*DB, error) {
 		DB:     db,
 		logger: log,
 	}, nil
+}
+
+// NewWithDSNAndSearchPath creates a new database connection from a DSN string with a search_path.
+// Used for test infrastructure where DSN comes from a test container.
+func NewWithDSNAndSearchPath(dsn string, searchPath string, log *logger.Logger) (*DB, error) {
+	db, err := NewWithDSN(dsn, log)
+	if err != nil {
+		return nil, err
+	}
+	db.searchPath = searchPath
+	return db, nil
+}
+
+// NewWithSearchPath creates a new database connection with a service-specific search_path.
+// Used for RLS-based multi-tenancy where each service operates in its own schema.
+//
+// Example search paths:
+//   - "public" (auth-service)
+//   - "users, public" (user-service)
+//   - "staff, public" (staff-service)
+//   - "inventory, public" (inventory-service)
+func NewWithSearchPath(cfg *config.DatabaseConfig, searchPath string, log *logger.Logger) (*DB, error) {
+	db, err := New(cfg, log)
+	if err != nil {
+		return nil, err
+	}
+	db.searchPath = searchPath
+	return db, nil
+}
+
+// SearchPath returns the configured search path for this DB instance
+func (db *DB) SearchPath() string {
+	return db.searchPath
 }
 
 // Ping checks the database connection

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -42,10 +43,10 @@ func main() {
 	r.Use(middleware.Timeout(60 * time.Second))
 
 	// CORS - supports subdomain-based multi-tenancy
+	corsOrigins := os.Getenv("MEDFLOW_CORS_ORIGINS") // comma-separated extra origins
 	r.Use(cors.Handler(cors.Options{
 		AllowOriginFunc: func(r *http.Request, origin string) bool {
 			// Allow localhost variations (development)
-			// Matches: http://localhost:3000, http://demo-clinic.localhost:3000, etc.
 			if origin == "http://localhost:3000" || origin == "http://localhost:5173" {
 				return true
 			}
@@ -60,6 +61,18 @@ func main() {
 			// Allow medflow.de itself
 			if origin == "https://medflow.de" || origin == "http://medflow.de" {
 				return true
+			}
+			// Allow Vercel deployments (production + previews)
+			if len(origin) > 11 && origin[len(origin)-11:] == ".vercel.app" {
+				return true
+			}
+			// Allow extra origins from env var
+			if corsOrigins != "" {
+				for _, allowed := range strings.Split(corsOrigins, ",") {
+					if strings.TrimSpace(allowed) == origin {
+						return true
+					}
+				}
 			}
 			return false
 		},

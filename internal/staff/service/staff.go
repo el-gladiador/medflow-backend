@@ -280,7 +280,6 @@ func (s *StaffService) AddCredentialsToEmployee(
 	// 8. Publish event
 	tenantID, _ := tenant.TenantID(ctx)
 	tenantSlug, _ := tenant.TenantSlug(ctx)
-	tenantSchema, _ := tenant.TenantSchema(ctx)
 	s.publisher.PublishEmployeeCredentialsAdded(
 		ctx,
 		employeeID,
@@ -290,7 +289,6 @@ func (s *StaffService) AddCredentialsToEmployee(
 		actorID,
 		tenantID,
 		tenantSlug,
-		tenantSchema,
 	)
 
 	return &CredentialResult{
@@ -358,7 +356,6 @@ func (s *StaffService) RemoveCredentialsFromEmployee(
 	// 5. Publish event
 	tenantID, _ := tenant.TenantID(ctx)
 	tenantSlug, _ := tenant.TenantSlug(ctx)
-	tenantSchema, _ := tenant.TenantSchema(ctx)
 	s.publisher.PublishEmployeeCredentialsRemoved(
 		ctx,
 		employeeID,
@@ -368,7 +365,6 @@ func (s *StaffService) RemoveCredentialsFromEmployee(
 		reason,
 		tenantID,
 		tenantSlug,
-		tenantSchema,
 	)
 
 	return nil

@@ -23,15 +23,15 @@ func NewRoleRepository(db *database.DB) *RoleRepository {
 }
 
 // GetByID gets a role by ID
-// TENANT-ISOLATED: Queries only the tenant's schema
+// TENANT-ISOLATED: Queries with RLS filtering by tenant
 func (r *RoleRepository) GetByID(ctx context.Context, id string) (*domain.Role, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var role domain.Role
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, name, display_name, COALESCE(display_name_de, display_name) as display_name_de,
 			       description, is_system, is_default, is_manager, can_receive_delegation, level,
@@ -79,15 +79,15 @@ func (r *RoleRepository) GetByID(ctx context.Context, id string) (*domain.Role, 
 }
 
 // GetByName gets a role by name
-// TENANT-ISOLATED: Queries only the tenant's schema
+// TENANT-ISOLATED: Queries with RLS filtering by tenant
 func (r *RoleRepository) GetByName(ctx context.Context, name string) (*domain.Role, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var role domain.Role
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, name, display_name, COALESCE(display_name_de, display_name) as display_name_de,
 			       description, is_system, is_default, is_manager, can_receive_delegation, level,
@@ -135,15 +135,15 @@ func (r *RoleRepository) GetByName(ctx context.Context, name string) (*domain.Ro
 }
 
 // List lists all roles
-// TENANT-ISOLATED: Returns only roles from the tenant's schema
+// TENANT-ISOLATED: Returns only roles visible to the tenant via RLS
 func (r *RoleRepository) List(ctx context.Context) ([]*domain.Role, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var roles []*domain.Role
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, name, display_name, COALESCE(display_name_de, display_name) as display_name_de,
 			       description, is_system, is_default, is_manager, can_receive_delegation, level,
@@ -201,13 +201,13 @@ func (r *RoleRepository) List(ctx context.Context) ([]*domain.Role, error) {
 // Note: Permissions are now stored as JSONB arrays in roles table
 // This method searches all roles for the permission
 func (r *RoleRepository) GetPermissionByName(ctx context.Context, name string) (*domain.Permission, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var perm *domain.Permission
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// Search roles for this permission
 		query := `
 			SELECT permissions FROM roles WHERE deleted_at IS NULL
@@ -250,13 +250,13 @@ func (r *RoleRepository) GetPermissionByName(ctx context.Context, name string) (
 // ListPermissions lists all unique permissions from all roles
 // Note: Permissions are now stored as JSONB arrays in roles table
 func (r *RoleRepository) ListPermissions(ctx context.Context) ([]*domain.Permission, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var permissions []*domain.Permission
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// Collect all unique permissions from all roles
 		query := `
 			SELECT permissions FROM roles WHERE deleted_at IS NULL

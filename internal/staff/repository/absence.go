@@ -104,7 +104,7 @@ func NewAbsenceRepository(db *database.DB) *AbsenceRepository {
 // Create creates a new absence request
 // TENANT-ISOLATED: Inserts into the tenant's schema
 func (r *AbsenceRepository) Create(ctx context.Context, absence *Absence) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -116,16 +116,16 @@ func (r *AbsenceRepository) Create(ctx context.Context, absence *Absence) error 
 		absence.Status = "pending"
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			INSERT INTO absences (
-				id, employee_id, start_date, end_date, absence_type, status,
+				id, tenant_id, employee_id, start_date, end_date, absence_type, status,
 				requested_at, vacation_days_used, employee_note, created_by
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			RETURNING created_at, updated_at
 		`
 		return r.db.QueryRowxContext(ctx, query,
-			absence.ID, absence.EmployeeID, absence.StartDate, absence.EndDate,
+			absence.ID, tenantID, absence.EmployeeID, absence.StartDate, absence.EndDate,
 			absence.AbsenceType, absence.Status, absence.RequestedAt,
 			absence.VacationDaysUsed, absence.EmployeeNote, absence.CreatedBy,
 		).Scan(&absence.CreatedAt, &absence.UpdatedAt)
@@ -135,14 +135,14 @@ func (r *AbsenceRepository) Create(ctx context.Context, absence *Absence) error 
 // GetByID gets an absence by ID
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *AbsenceRepository) GetByID(ctx context.Context, id string) (*Absence, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var absence Absence
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT a.id, a.employee_id, a.start_date, a.end_date, a.absence_type, a.status,
 			       a.requested_at, a.reviewed_by, a.reviewed_at, a.rejection_reason,
@@ -169,7 +169,7 @@ func (r *AbsenceRepository) GetByID(ctx context.Context, id string) (*Absence, e
 // List lists absences with filters
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *AbsenceRepository) List(ctx context.Context, params AbsenceListParams) ([]*Absence, int64, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -177,7 +177,7 @@ func (r *AbsenceRepository) List(ctx context.Context, params AbsenceListParams) 
 	var total int64
 	var absences []*Absence
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// Build WHERE clause
 		whereClause := "WHERE a.deleted_at IS NULL"
 		args := []interface{}{}
@@ -250,14 +250,14 @@ func (r *AbsenceRepository) List(ctx context.Context, params AbsenceListParams) 
 // ListPending lists all pending absence requests
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *AbsenceRepository) ListPending(ctx context.Context) ([]*Absence, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var absences []*Absence
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT a.id, a.employee_id, a.start_date, a.end_date, a.absence_type, a.status,
 			       a.requested_at, a.reviewed_by, a.reviewed_at, a.rejection_reason,
@@ -282,12 +282,12 @@ func (r *AbsenceRepository) ListPending(ctx context.Context) ([]*Absence, error)
 // Update updates an absence
 // TENANT-ISOLATED: Updates only in the tenant's schema
 func (r *AbsenceRepository) Update(ctx context.Context, absence *Absence) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE absences SET
 				start_date = $2, end_date = $3, absence_type = $4, status = $5,
@@ -316,12 +316,12 @@ func (r *AbsenceRepository) Update(ctx context.Context, absence *Absence) error 
 // Approve approves an absence request
 // TENANT-ISOLATED: Updates only in the tenant's schema
 func (r *AbsenceRepository) Approve(ctx context.Context, id string, reviewedBy string, managerNote *string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE absences SET
 				status = 'approved', reviewed_by = $2, reviewed_at = NOW(), manager_note = $3
@@ -344,12 +344,12 @@ func (r *AbsenceRepository) Approve(ctx context.Context, id string, reviewedBy s
 // Reject rejects an absence request
 // TENANT-ISOLATED: Updates only in the tenant's schema
 func (r *AbsenceRepository) Reject(ctx context.Context, id string, reviewedBy string, reason string, managerNote *string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE absences SET
 				status = 'rejected', reviewed_by = $2, reviewed_at = NOW(),
@@ -373,12 +373,12 @@ func (r *AbsenceRepository) Reject(ctx context.Context, id string, reviewedBy st
 // Delete soft deletes an absence
 // TENANT-ISOLATED: Soft deletes only in the tenant's schema
 func (r *AbsenceRepository) Delete(ctx context.Context, id string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `UPDATE absences SET deleted_at = NOW(), status = 'cancelled' WHERE id = $1 AND deleted_at IS NULL`
 		result, err := r.db.ExecContext(ctx, query, id)
 		if err != nil {
@@ -397,14 +397,14 @@ func (r *AbsenceRepository) Delete(ctx context.Context, id string) error {
 // GetAbsencesForDateRange gets absences that overlap with a date range
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *AbsenceRepository) GetAbsencesForDateRange(ctx context.Context, employeeID string, startDate, endDate time.Time) ([]*Absence, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var absences []*Absence
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, employee_id, start_date, end_date, absence_type, status,
 			       requested_at, reviewed_by, reviewed_at, rejection_reason,
@@ -432,14 +432,14 @@ func (r *AbsenceRepository) GetAbsencesForDateRange(ctx context.Context, employe
 // GetVacationBalance gets vacation balance for an employee for a year
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *AbsenceRepository) GetVacationBalance(ctx context.Context, employeeID string, year int) (*VacationBalance, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var balance VacationBalance
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, employee_id, year, annual_entitlement, carryover_from_previous,
 			       additional_granted, taken, planned, pending, created_at, updated_at
@@ -462,7 +462,7 @@ func (r *AbsenceRepository) GetVacationBalance(ctx context.Context, employeeID s
 // CreateOrUpdateVacationBalance creates or updates vacation balance
 // TENANT-ISOLATED: Inserts/updates only in the tenant's schema
 func (r *AbsenceRepository) CreateOrUpdateVacationBalance(ctx context.Context, balance *VacationBalance) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -471,21 +471,21 @@ func (r *AbsenceRepository) CreateOrUpdateVacationBalance(ctx context.Context, b
 		balance.ID = uuid.New().String()
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			INSERT INTO vacation_balances (
-				id, employee_id, year, annual_entitlement, carryover_from_previous,
+				id, tenant_id, employee_id, year, annual_entitlement, carryover_from_previous,
 				additional_granted, taken, planned, pending
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 			ON CONFLICT (employee_id, year)
 			DO UPDATE SET
-				annual_entitlement = $4, carryover_from_previous = $5,
-				additional_granted = $6, taken = $7, planned = $8, pending = $9,
+				annual_entitlement = $5, carryover_from_previous = $6,
+				additional_granted = $7, taken = $8, planned = $9, pending = $10,
 				updated_at = NOW()
 			RETURNING created_at, updated_at
 		`
 		return r.db.QueryRowxContext(ctx, query,
-			balance.ID, balance.EmployeeID, balance.Year, balance.AnnualEntitlement,
+			balance.ID, tenantID, balance.EmployeeID, balance.Year, balance.AnnualEntitlement,
 			balance.CarryoverFromPrevious, balance.AdditionalGranted,
 			balance.Taken, balance.Planned, balance.Pending,
 		).Scan(&balance.CreatedAt, &balance.UpdatedAt)
@@ -495,12 +495,12 @@ func (r *AbsenceRepository) CreateOrUpdateVacationBalance(ctx context.Context, b
 // UpdateVacationUsage updates the vacation usage fields
 // TENANT-ISOLATED: Updates only in the tenant's schema
 func (r *AbsenceRepository) UpdateVacationUsage(ctx context.Context, employeeID string, year int, taken, planned, pending float64) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE vacation_balances SET
 				taken = $3, planned = $4, pending = $5, updated_at = NOW()
@@ -527,7 +527,7 @@ func (r *AbsenceRepository) UpdateVacationUsage(ctx context.Context, employeeID 
 // CreateComplianceLog creates a new compliance log entry
 // TENANT-ISOLATED: Inserts into the tenant's schema
 func (r *AbsenceRepository) CreateComplianceLog(ctx context.Context, log *ArbzgComplianceLog) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -536,16 +536,16 @@ func (r *AbsenceRepository) CreateComplianceLog(ctx context.Context, log *ArbzgC
 		log.ID = uuid.New().String()
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			INSERT INTO arbzg_compliance_log (
-				id, employee_id, time_entry_id, violation_date, violation_type,
+				id, tenant_id, employee_id, time_entry_id, violation_date, violation_type,
 				severity, description, details
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			RETURNING created_at
 		`
 		return r.db.QueryRowxContext(ctx, query,
-			log.ID, log.EmployeeID, log.TimeEntryID, log.ViolationDate,
+			log.ID, tenantID, log.EmployeeID, log.TimeEntryID, log.ViolationDate,
 			log.ViolationType, log.Severity, log.Description, log.Details,
 		).Scan(&log.CreatedAt)
 	})
@@ -554,7 +554,7 @@ func (r *AbsenceRepository) CreateComplianceLog(ctx context.Context, log *ArbzgC
 // ListComplianceLogs lists compliance violations with filters
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *AbsenceRepository) ListComplianceLogs(ctx context.Context, employeeID *string, startDate, endDate *time.Time, unacknowledgedOnly bool, page, perPage int) ([]*ArbzgComplianceLog, int64, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -562,7 +562,7 @@ func (r *AbsenceRepository) ListComplianceLogs(ctx context.Context, employeeID *
 	var total int64
 	var logs []*ArbzgComplianceLog
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// Build WHERE clause
 		whereClause := "WHERE 1=1"
 		args := []interface{}{}
@@ -627,12 +627,12 @@ func (r *AbsenceRepository) ListComplianceLogs(ctx context.Context, employeeID *
 // AcknowledgeViolation acknowledges a compliance violation
 // TENANT-ISOLATED: Updates only in the tenant's schema
 func (r *AbsenceRepository) AcknowledgeViolation(ctx context.Context, id string, acknowledgedBy string, resolutionNote *string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE arbzg_compliance_log SET
 				acknowledged_by = $2, acknowledged_at = NOW(), resolution_note = $3

@@ -142,7 +142,7 @@ func TestValidateCredentials_TenantHeaders(t *testing.T) {
 	t.Run("tenant headers should be forwarded to user service", func(t *testing.T) {
 		// This test documents the expected behavior:
 		// When validateCredentials finds a user via lookup table,
-		// it should forward X-Tenant-ID, X-Tenant-Slug, X-Tenant-Schema
+		// it should forward X-Tenant-ID and X-Tenant-Slug
 		// headers to the user service.
 		//
 		// Full integration tests are in auth_integration_test.go
@@ -151,14 +151,12 @@ func TestValidateCredentials_TenantHeaders(t *testing.T) {
 		expectedHeaders := []string{
 			"X-Tenant-ID",
 			"X-Tenant-Slug",
-			"X-Tenant-Schema",
 		}
 
 		// Verify we're testing for the right headers
-		assert.Len(t, expectedHeaders, 3)
+		assert.Len(t, expectedHeaders, 2)
 		assert.Contains(t, expectedHeaders, "X-Tenant-ID")
 		assert.Contains(t, expectedHeaders, "X-Tenant-Slug")
-		assert.Contains(t, expectedHeaders, "X-Tenant-Schema")
 	})
 }
 

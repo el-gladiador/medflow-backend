@@ -30,8 +30,9 @@ type IntegrationSuite struct {
 	t             *testing.T
 }
 
-// NewIntegrationSuite creates a new integration test suite.
+// NewIntegrationSuite creates a new integration test suite with RLS-based multi-tenancy.
 // Call this in TestMain to set up shared test infrastructure.
+// The searchPath parameter determines which service schema to use (e.g., "users, public").
 //
 // Usage:
 //
@@ -41,7 +42,7 @@ type IntegrationSuite struct {
 //	    ctx := context.Background()
 //	    var code int
 //
-//	    suite, err := testutil.NewIntegrationSuite(ctx)
+//	    suite, err := testutil.NewIntegrationSuite(ctx, "users, public")
 //	    if err != nil {
 //	        log.Fatal(err)
 //	    }
@@ -56,21 +57,48 @@ type IntegrationSuite struct {
 //	    tenant := suite.SetupTenant(t, ctx, "test-tenant", testutil.UserMigrations())
 //	    // ... run tests with tenant context
 //	}
-func NewIntegrationSuite(ctx context.Context) (*IntegrationSuite, error) {
+func NewIntegrationSuite(ctx context.Context, searchPaths ...string) (*IntegrationSuite, error) {
 	container, db, err := getOrCreateContainer(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create wrapped database using DSN
+	// Determine search path (default to "public")
+	searchPath := "public"
+	if len(searchPaths) > 0 && searchPaths[0] != "" {
+		searchPath = searchPaths[0]
+	}
+
 	log := logger.New("test", "test")
-	wrappedDB, err := database.NewWithDSN(container.DSN, log)
-	if err != nil {
+
+	// Create public schema and service schemas
+	if err := container.CreatePublicSchema(ctx, db); err != nil {
 		return nil, err
 	}
 
-	// Create public schema
-	if err := container.CreatePublicSchema(ctx, db); err != nil {
+	// Create service schema tables based on search path
+	schemasToCreate := []string{}
+	for _, s := range []string{"users", "staff", "inventory"} {
+		schemasToCreate = append(schemasToCreate, s)
+	}
+	if err := container.CreateServiceSchemas(ctx, db, schemasToCreate...); err != nil {
+		return nil, err
+	}
+
+	// Create medflow_app role with FORCE RLS (mirrors migration 000008+000009)
+	// This ensures integration tests validate RLS enforcement, not just RLS policy existence.
+	if err := container.CreateAppRole(ctx, db); err != nil {
+		return nil, err
+	}
+
+	// Use the app role DSN for the wrapped DB so tests run as non-superuser.
+	// The RawDB (superuser) is still available for test setup (creating tenants, seeding data).
+	appDSN := container.AppRoleDSN
+	if appDSN == "" {
+		appDSN = container.DSN // fallback to superuser if app role wasn't created
+	}
+	wrappedDB, err := database.NewWithDSNAndSearchPath(appDSN, searchPath, log)
+	if err != nil {
 		return nil, err
 	}
 
@@ -110,7 +138,7 @@ func (s *IntegrationSuite) SetupTenant(t *testing.T, ctx context.Context, name s
 	// Register cleanup
 	t.Cleanup(func() {
 		if err := s.TenantManager.DropTenant(ctx, tenant); err != nil {
-			t.Logf("warning: failed to drop tenant %s: %v", tenant.SchemaName, err)
+			t.Logf("warning: failed to drop tenant %s: %v", tenant.Slug, err)
 		}
 	})
 

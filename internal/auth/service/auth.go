@@ -76,9 +76,8 @@ type UserInfo struct {
 	IsManager   bool     `json:"is_manager"`
 
 	// Tenant context - populated by user service during login
-	TenantID     string `json:"tenant_id,omitempty"`
-	TenantSlug   string `json:"tenant_slug,omitempty"`
-	TenantSchema string `json:"tenant_schema,omitempty"`
+	TenantID   string `json:"tenant_id,omitempty"`
+	TenantSlug string `json:"tenant_slug,omitempty"`
 }
 
 // FullName returns the user's full name
@@ -107,9 +106,8 @@ func (s *AuthService) Login(ctx context.Context, req *LoginRequest, userAgent, i
 		IsManager:   user.IsManager,
 
 		// Pass tenant context from user service to JWT
-		TenantID:     user.TenantID,
-		TenantSlug:   user.TenantSlug,
-		TenantSchema: user.TenantSchema,
+		TenantID:   user.TenantID,
+		TenantSlug: user.TenantSlug,
 	}
 
 	// Generate a session ID first
@@ -165,7 +163,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*jwt.To
 	}
 
 	// Get user info from user service (pass tenant context from refresh token claims)
-	user, err := s.getUserInfo(ctx, claims.UserID, claims.TenantID, claims.TenantSlug, claims.TenantSchema)
+	user, err := s.getUserInfo(ctx, claims.UserID, claims.TenantID, claims.TenantSlug)
 	if err != nil {
 		return nil, err
 	}
@@ -181,9 +179,8 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*jwt.To
 		IsManager:   user.IsManager,
 
 		// Preserve tenant context for new tokens
-		TenantID:     claims.TenantID,
-		TenantSlug:   claims.TenantSlug,
-		TenantSchema: claims.TenantSchema,
+		TenantID:   claims.TenantID,
+		TenantSlug: claims.TenantSlug,
 	}
 
 	tokens, err := s.jwtManager.GenerateTokenPair(tokenInfo, session.ID)
@@ -201,8 +198,8 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*jwt.To
 }
 
 // GetCurrentUser gets the current user from token claims
-func (s *AuthService) GetCurrentUser(ctx context.Context, userID, tenantID, tenantSlug, tenantSchema string) (*UserInfo, error) {
-	return s.getUserInfo(ctx, userID, tenantID, tenantSlug, tenantSchema)
+func (s *AuthService) GetCurrentUser(ctx context.Context, userID, tenantID, tenantSlug string) (*UserInfo, error) {
+	return s.getUserInfo(ctx, userID, tenantID, tenantSlug)
 }
 
 // isEmail checks if the identifier looks like an email address
@@ -239,7 +236,7 @@ func (s *AuthService) validateCredentials(ctx context.Context, identifier, passw
 		s.logger.Debug().
 			Str("email", identifier).
 			Str("tenant_id", lookup.TenantID).
-			Str("tenant_schema", lookup.TenantSchema).
+			Str("tenant_slug", lookup.TenantSlug).
 			Msg("tenant resolved from lookup table (email)")
 	} else {
 		// Username login: REQUIRES tenant_slug from subdomain
@@ -264,7 +261,7 @@ func (s *AuthService) validateCredentials(ctx context.Context, identifier, passw
 		s.logger.Debug().
 			Str("username", identifier).
 			Str("tenant_id", lookup.TenantID).
-			Str("tenant_schema", lookup.TenantSchema).
+			Str("tenant_slug", lookup.TenantSlug).
 			Msg("tenant resolved from lookup table (username + tenant_slug)")
 	}
 
@@ -288,10 +285,9 @@ func (s *AuthService) validateCredentials(ctx context.Context, identifier, passw
 
 	req.Header.Set("Content-Type", "application/json")
 
-	// CRITICAL: Forward tenant headers for Schema-per-Tenant isolation
+	// Forward tenant headers for RLS isolation
 	req.Header.Set("X-Tenant-ID", lookup.TenantID)
 	req.Header.Set("X-Tenant-Slug", lookup.TenantSlug)
-	req.Header.Set("X-Tenant-Schema", lookup.TenantSchema)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -321,14 +317,13 @@ func (s *AuthService) validateCredentials(ctx context.Context, identifier, passw
 	if result.Data != nil {
 		result.Data.TenantID = lookup.TenantID
 		result.Data.TenantSlug = lookup.TenantSlug
-		result.Data.TenantSchema = lookup.TenantSchema
 	}
 
 	return result.Data, nil
 }
 
 // getUserInfo fetches user info from user service
-func (s *AuthService) getUserInfo(ctx context.Context, userID, tenantID, tenantSlug, tenantSchema string) (*UserInfo, error) {
+func (s *AuthService) getUserInfo(ctx context.Context, userID, tenantID, tenantSlug string) (*UserInfo, error) {
 	url := fmt.Sprintf("%s/api/v1/internal/users/%s", s.config.Services.UserServiceURL, userID)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -336,15 +331,12 @@ func (s *AuthService) getUserInfo(ctx context.Context, userID, tenantID, tenantS
 		return nil, errors.Internal("failed to create request")
 	}
 
-	// Forward tenant headers to user service (required for Schema-per-Tenant isolation)
+	// Forward tenant headers to user service (required for RLS-based tenant isolation)
 	if tenantID != "" {
 		req.Header.Set("X-Tenant-ID", tenantID)
 	}
 	if tenantSlug != "" {
 		req.Header.Set("X-Tenant-Slug", tenantSlug)
-	}
-	if tenantSchema != "" {
-		req.Header.Set("X-Tenant-Schema", tenantSchema)
 	}
 
 	resp, err := http.DefaultClient.Do(req)

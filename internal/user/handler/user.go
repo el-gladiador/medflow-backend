@@ -82,11 +82,10 @@ func (h *UserHandler) GetUserInternal(w http.ResponseWriter, r *http.Request) {
 	// Internal endpoints don't use TenantMiddleware, so we manually add tenant context
 	tenantID := r.Header.Get("X-Tenant-ID")
 	tenantSlug := r.Header.Get("X-Tenant-Slug")
-	tenantSchema := r.Header.Get("X-Tenant-Schema")
 
 	ctx := r.Context()
-	if tenantID != "" && tenantSchema != "" {
-		ctx = tenant.WithTenantContext(ctx, tenantID, tenantSlug, tenantSchema)
+	if tenantID != "" {
+		ctx = tenant.WithTenantContext(ctx, tenantID, tenantSlug)
 	}
 
 	user, err := h.service.GetByID(ctx, id)
@@ -339,18 +338,16 @@ func (h *UserHandler) ValidateCredentials(w http.ResponseWriter, r *http.Request
 	// Check for tenant headers (new O(1) path from lookup table)
 	tenantID := r.Header.Get("X-Tenant-ID")
 	tenantSlug := r.Header.Get("X-Tenant-Slug")
-	tenantSchema := r.Header.Get("X-Tenant-Schema")
 
-	if tenantID != "" && tenantSchema != "" {
-		// NEW PATH: O(1) tenant-aware validation
+	if tenantID != "" {
+		// Primary path: tenant-aware validation via RLS
 		h.logger.Debug().
 			Str("identifier", req.Identifier).
 			Str("tenant_id", tenantID).
-			Str("tenant_schema", tenantSchema).
-			Msg("validating credentials with tenant context (O(1) path)")
+			Msg("validating credentials with tenant context")
 
 		// Add tenant context to request context
-		ctx := tenant.WithTenantContext(r.Context(), tenantID, tenantSlug, tenantSchema)
+		ctx := tenant.WithTenantContext(r.Context(), tenantID, tenantSlug)
 
 		user, err := h.service.ValidateCredentialsInTenant(ctx, req.Identifier, req.Password)
 		if err != nil {
@@ -372,20 +369,18 @@ func (h *UserHandler) ValidateCredentials(w http.ResponseWriter, r *http.Request
 			"role":        user.Role.Name,
 			"permissions": permissions,
 			"is_manager":  user.Role.IsManager,
-			// Tenant context from headers
-			"tenant_id":     tenantID,
-			"tenant_slug":   tenantSlug,
-			"tenant_schema": tenantSchema,
+			"tenant_id":   tenantID,
+			"tenant_slug": tenantSlug,
 		}
 
 		httputil.JSON(w, http.StatusOK, response)
 		return
 	}
 
-	// LEGACY PATH: O(N) cross-tenant search (fallback during migration period)
+	// Fallback path: cross-tenant search (login without tenant context)
 	h.logger.Debug().
 		Str("identifier", req.Identifier).
-		Msg("validating credentials without tenant context (legacy O(N) path)")
+		Msg("validating credentials without tenant context (cross-tenant lookup)")
 
 	user, tenantInfo, err := h.service.ValidateCredentials(r.Context(), req.Identifier, req.Password)
 	if err != nil {
@@ -399,20 +394,16 @@ func (h *UserHandler) ValidateCredentials(w http.ResponseWriter, r *http.Request
 
 	// Return user info WITH tenant context for auth service
 	response := map[string]interface{}{
-		"id":     user.ID,
-		"email":  user.Email,
+		"id":          user.ID,
+		"email":       user.Email,
 		"first_name":  user.FirstName,
 		"last_name":   user.LastName,
 		"avatar_url":  user.AvatarURL,
-		"role":   user.Role.Name,
-
+		"role":        user.Role.Name,
 		"permissions": permissions,
 		"is_manager":  user.Role.IsManager,
-
-		// Tenant context - critical for multi-tenancy
-		"tenant_id":     tenantInfo.ID,
-		"tenant_slug":   tenantInfo.Slug,
-		"tenant_schema": tenantSchema,
+		"tenant_id":   tenantInfo.ID,
+		"tenant_slug": tenantInfo.Slug,
 	}
 
 	httputil.JSON(w, http.StatusOK, response)

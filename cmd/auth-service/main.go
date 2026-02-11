@@ -35,19 +35,18 @@ func main() {
 	log := logger.New("auth-service", cfg.Server.Environment)
 	log.Info().Msg("starting Auth Service")
 
-	// Connect to database
-	db, err := database.New(&cfg.Database, log)
+	// Connect to database (single Supabase DB, search_path = public)
+	db, err := database.NewWithSearchPath(&cfg.Database, cfg.Database.SearchPath, log)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to connect to database")
 	}
 	defer db.Close()
 
-	// Connect to RabbitMQ
-	rmq, err := messaging.New(&cfg.RabbitMQ, log)
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to connect to RabbitMQ")
+	// Connect to RabbitMQ (optional — nil if unavailable)
+	rmq := messaging.NewOptional(&cfg.RabbitMQ, log)
+	if rmq != nil {
+		defer rmq.Close()
 	}
-	defer rmq.Close()
 
 	// Initialize repositories
 	jwtManager := jwt.NewManager(&cfg.JWT)
@@ -58,20 +57,26 @@ func main() {
 	authService := service.NewAuthService(sessionRepo, lookupRepo, jwtManager, cfg, log)
 	authHandler := handler.NewAuthHandler(authService, log)
 
-	// Initialize and start user event consumer for lookup table sync
-	userConsumer, err := consumers.NewUserEventConsumer(rmq, lookupRepo, log)
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to create user event consumer")
-	}
+	// Initialize and start user event consumer for lookup table sync (if RabbitMQ is available)
+	var consumerCancel context.CancelFunc
+	if rmq != nil {
+		userConsumer, err := consumers.NewUserEventConsumer(rmq, lookupRepo, log)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to create user event consumer")
+		}
 
-	// Create cancellable context for consumer
-	consumerCtx, consumerCancel := context.WithCancel(context.Background())
+		var consumerCtx context.Context
+		consumerCtx, consumerCancel = context.WithCancel(context.Background())
+
+		if err := userConsumer.Start(consumerCtx); err != nil {
+			log.Fatal().Err(err).Msg("failed to start user event consumer")
+		}
+		log.Info().Msg("user event consumer started for lookup table sync")
+	} else {
+		consumerCancel = func() {} // no-op
+		log.Warn().Msg("user event consumer disabled (no RabbitMQ)")
+	}
 	defer consumerCancel()
-
-	if err := userConsumer.Start(consumerCtx); err != nil {
-		log.Fatal().Err(err).Msg("failed to start user event consumer")
-	}
-	log.Info().Msg("user event consumer started for lookup table sync")
 
 	// Create router
 	r := chi.NewRouter()
@@ -84,12 +89,17 @@ func main() {
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		httputil.JSON(w, http.StatusOK, map[string]interface{}{
+		health := map[string]interface{}{
 			"status":   "healthy",
 			"service":  "auth-service",
 			"database": db.Health(r.Context()),
-			"rabbitmq": rmq.Health(),
-		})
+		}
+		if rmq != nil {
+			health["rabbitmq"] = rmq.Health()
+		} else {
+			health["rabbitmq"] = map[string]string{"status": "disabled"}
+		}
+		httputil.JSON(w, http.StatusOK, health)
 	})
 
 	// Auth routes

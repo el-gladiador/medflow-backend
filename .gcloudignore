@@ -1,0 +1,41 @@
+# Cloud Build upload exclusions
+# Reduces upload size for gcloud builds submit
+
+.git/
+.github/
+.idea/
+.vscode/
+
+# Test infrastructure
+pkg/testutil/
+*_test.go
+**/*_test.go
+testdata/
+
+# Local environment files
+deployments/.env
+deployments/.env.*
+!deployments/.env.cloudrun.example
+.env
+.env.*
+
+# Scripts and docs
+scripts/
+docs/
+*.md
+LICENSE
+
+# Build artifacts
+bin/
+tmp/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE and OS files
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

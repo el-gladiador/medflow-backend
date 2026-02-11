@@ -9,9 +9,8 @@ import (
 type contextKey string
 
 const (
-	tenantIDKey     contextKey = "tenant_id"
-	tenantSlugKey   contextKey = "tenant_slug"
-	tenantSchemaKey contextKey = "tenant_schema"
+	tenantIDKey   contextKey = "tenant_id"
+	tenantSlugKey contextKey = "tenant_slug"
 )
 
 var (
@@ -19,12 +18,11 @@ var (
 	ErrNoTenantInContext = errors.New("no tenant in context")
 )
 
-// WithTenantContext adds all tenant information to the context
-// This should be called by middleware after extracting tenant from JWT
-func WithTenantContext(ctx context.Context, id, slug, schema string) context.Context {
+// WithTenantContext adds tenant information to the context.
+// Used by middleware after extracting tenant from JWT.
+func WithTenantContext(ctx context.Context, id, slug string) context.Context {
 	ctx = context.WithValue(ctx, tenantIDKey, id)
 	ctx = context.WithValue(ctx, tenantSlugKey, slug)
-	ctx = context.WithValue(ctx, tenantSchemaKey, schema)
 	return ctx
 }
 
@@ -38,13 +36,9 @@ func WithTenantSlug(ctx context.Context, tenantSlug string) context.Context {
 	return context.WithValue(ctx, tenantSlugKey, tenantSlug)
 }
 
-// WithTenantSchema adds only tenant schema to context
-func WithTenantSchema(ctx context.Context, tenantSchema string) context.Context {
-	return context.WithValue(ctx, tenantSchemaKey, tenantSchema)
-}
-
-// TenantID extracts tenant ID from context
-// Returns ErrNoTenantInContext if tenant ID is not found
+// TenantID extracts tenant ID from context.
+// This is the primary function for RLS-based multi-tenancy — used by all repositories
+// to set app.current_tenant for RLS policy evaluation.
 func TenantID(ctx context.Context) (string, error) {
 	id, ok := ctx.Value(tenantIDKey).(string)
 	if !ok || id == "" {
@@ -63,17 +57,6 @@ func TenantSlug(ctx context.Context) (string, error) {
 	return slug, nil
 }
 
-// TenantSchema extracts tenant schema name from context
-// Returns ErrNoTenantInContext if tenant schema is not found
-// This is the most important function - used by repositories to set search_path
-func TenantSchema(ctx context.Context) (string, error) {
-	schema, ok := ctx.Value(tenantSchemaKey).(string)
-	if !ok || schema == "" {
-		return "", ErrNoTenantInContext
-	}
-	return schema, nil
-}
-
 // MustTenantID extracts tenant ID from context and panics if not found
 // Use only in cases where missing tenant is a programming error
 func MustTenantID(ctx context.Context) string {
@@ -82,14 +65,4 @@ func MustTenantID(ctx context.Context) string {
 		panic("tenant ID not found in context")
 	}
 	return id
-}
-
-// MustTenantSchema extracts tenant schema from context and panics if not found
-// Use only in cases where missing tenant is a programming error
-func MustTenantSchema(ctx context.Context) string {
-	schema, err := TenantSchema(ctx)
-	if err != nil {
-		panic("tenant schema not found in context")
-	}
-	return schema
 }

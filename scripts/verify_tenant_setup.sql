@@ -1,4 +1,4 @@
--- Verification Script for Test Tenant Setup
+-- Verification Script for Test Tenant Setup (RLS-based multi-tenancy)
 -- Run this to verify the test tenant and user were created correctly
 
 \echo ''
@@ -12,71 +12,71 @@
 SELECT
     id,
     slug,
-    schema_name,
     name,
-    subscription_tier,
     subscription_status,
-    email
+    created_at
 FROM public.tenants
 WHERE slug = 'test-practice';
 
 \echo ''
-\echo '2. Checking schema exists...'
-SELECT nspname AS schema_name
-FROM pg_namespace
-WHERE nspname = 'tenant_test_practice';
+\echo '2. Checking RLS policies exist on users schema...'
+SELECT tablename, policyname
+FROM pg_policies
+WHERE schemaname = 'users'
+ORDER BY tablename;
 
 \echo ''
-\echo '3. Checking tables in tenant schema...'
-SELECT table_name
-FROM information_schema.tables
-WHERE table_schema = 'tenant_test_practice'
-ORDER BY table_name;
+\echo '3. Checking RLS policies exist on staff schema...'
+SELECT tablename, policyname
+FROM pg_policies
+WHERE schemaname = 'staff'
+ORDER BY tablename;
 
 \echo ''
-\echo '4. Checking user exists in tenant...'
-SET search_path TO tenant_test_practice;
+\echo '4. Checking RLS policies exist on inventory schema...'
+SELECT tablename, policyname
+FROM pg_policies
+WHERE schemaname = 'inventory'
+ORDER BY tablename;
+
+\echo ''
+\echo '5. Checking user exists for tenant (via RLS)...'
+SET LOCAL app.current_tenant = 'a0000000-0000-0000-0000-000000000001';
+SET LOCAL search_path TO users, public;
 SELECT
     id,
     email,
     first_name,
     last_name,
-    status,
-    email_verified_at IS NOT NULL AS email_verified
+    status
 FROM users
-WHERE email = 'mohammadamiri.py@gmail.com';
+LIMIT 5;
 
 \echo ''
-\echo '5. Checking user roles...'
+\echo '6. Checking user-tenant lookup entries...'
+SET LOCAL search_path TO public;
 SELECT
-    u.email,
-    r.name AS role_name,
-    r.display_name
-FROM users u
-JOIN user_roles ur ON u.id = ur.user_id
-JOIN roles r ON ur.role_id = r.id
-WHERE u.email = 'mohammadamiri.py@gmail.com';
+    email,
+    username,
+    user_id,
+    tenant_id,
+    tenant_slug
+FROM public.user_tenant_lookup
+WHERE tenant_id = 'a0000000-0000-0000-0000-000000000001';
 
 \echo ''
-\echo '6. Verifying tenant isolation (should return 0 rows)...'
-SET search_path TO public;
-SELECT COUNT(*) AS user_count_in_public_schema
-FROM information_schema.tables
-WHERE table_schema = 'public'
-  AND table_name = 'users';
-
-\echo ''
-\echo '7. Checking default roles in tenant schema...'
-SET search_path TO tenant_test_practice;
-SELECT id, name, display_name, description
+\echo '7. Checking default roles for tenant...'
+SET LOCAL app.current_tenant = 'a0000000-0000-0000-0000-000000000001';
+SET LOCAL search_path TO users, public;
+SELECT id, name, display_name, level
 FROM roles
-ORDER BY name;
+ORDER BY level DESC;
 
 \echo ''
 \echo '8. Tenant audit log...'
 SELECT
     action,
-    performed_by,
+    actor_name,
     details,
     created_at
 FROM public.tenant_audit_log

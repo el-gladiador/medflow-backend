@@ -47,9 +47,9 @@ func NewAlertRepository(db *database.DB) *AlertRepository {
 }
 
 // Create creates a new alert
-// TENANT-ISOLATED: Inserts into the tenant's schema
+// TENANT-ISOLATED: Inserts with tenant_id for RLS
 func (r *AlertRepository) Create(ctx context.Context, alert *InventoryAlert) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -62,30 +62,30 @@ func (r *AlertRepository) Create(ctx context.Context, alert *InventoryAlert) err
 		alert.Status = "open"
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-			INSERT INTO inventory_alerts (id, item_id, batch_id, alert_type, severity, message, status)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			INSERT INTO inventory_alerts (id, tenant_id, item_id, batch_id, alert_type, severity, message, status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 			RETURNING created_at
 		`
 
 		return r.db.QueryRowxContext(ctx, query,
-			alert.ID, alert.ItemID, alert.BatchID, alert.AlertType,
+			alert.ID, tenantID, alert.ItemID, alert.BatchID, alert.AlertType,
 			alert.Severity, alert.Message, alert.Status,
 		).Scan(&alert.CreatedAt)
 	})
 }
 
 // GetByID gets an alert by ID
-// TENANT-ISOLATED: Queries only the tenant's schema
+// TENANT-ISOLATED: Queries via RLS
 func (r *AlertRepository) GetByID(ctx context.Context, id string) (*InventoryAlert, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var alert InventoryAlert
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, item_id, batch_id, alert_type, severity, message, status,
 			       acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at
@@ -104,9 +104,9 @@ func (r *AlertRepository) GetByID(ctx context.Context, id string) (*InventoryAle
 }
 
 // List lists alerts with filtering
-// TENANT-ISOLATED: Returns only alerts from the tenant's schema
+// TENANT-ISOLATED: Returns only alerts via RLS
 func (r *AlertRepository) List(ctx context.Context, acknowledged *bool, alertType string, page, perPage int) ([]*InventoryAlert, int64, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -114,7 +114,7 @@ func (r *AlertRepository) List(ctx context.Context, acknowledged *bool, alertTyp
 	var total int64
 	var alerts []*InventoryAlert
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		args := []interface{}{}
 		argIndex := 1
 
@@ -164,14 +164,14 @@ func (r *AlertRepository) List(ctx context.Context, acknowledged *bool, alertTyp
 }
 
 // Acknowledge acknowledges an alert
-// TENANT-ISOLATED: Updates only in the tenant's schema
+// TENANT-ISOLATED: Updates via RLS
 func (r *AlertRepository) Acknowledge(ctx context.Context, id, userID string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE inventory_alerts
 			SET status = 'acknowledged', acknowledged_by = $2, acknowledged_at = NOW()
@@ -193,14 +193,14 @@ func (r *AlertRepository) Acknowledge(ctx context.Context, id, userID string) er
 }
 
 // DeleteOld deletes old resolved alerts
-// TENANT-ISOLATED: Deletes only from the tenant's schema
+// TENANT-ISOLATED: Deletes via RLS
 func (r *AlertRepository) DeleteOld(ctx context.Context, olderThan time.Duration) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `DELETE FROM inventory_alerts WHERE status = 'resolved' AND resolved_at < $1`
 		_, err := r.db.ExecContext(ctx, query, time.Now().Add(-olderThan))
 		return err
@@ -208,15 +208,15 @@ func (r *AlertRepository) DeleteOld(ctx context.Context, olderThan time.Duration
 }
 
 // GetUnacknowledgedCount gets count of open alerts
-// TENANT-ISOLATED: Queries only the tenant's schema
+// TENANT-ISOLATED: Queries via RLS
 func (r *AlertRepository) GetUnacknowledgedCount(ctx context.Context) (int64, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return 0, err
 	}
 
 	var count int64
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `SELECT COUNT(*) FROM inventory_alerts WHERE status = 'open'`
 		return r.db.GetContext(ctx, &count, query)
 	})

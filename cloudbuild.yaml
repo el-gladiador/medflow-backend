@@ -1,0 +1,216 @@
+# Cloud Build pipeline for MedFlow backend
+# Builds and deploys all 6 services to Cloud Run in parallel.
+#
+# Trigger: push to main branch
+# Usage:  gcloud builds submit --config cloudbuild.yaml .
+# Manual: make cloud-submit-all
+#
+# Substitution variables:
+#   _REGION     - Cloud Run region (default: europe-west1)
+#   _REPOSITORY - Artifact Registry repo name (default: medflow)
+
+substitutions:
+  _REGION: europe-west1
+  _REPOSITORY: medflow
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+# ============================================================
+# Step 1: Build all Docker images (parallel)
+# ============================================================
+steps:
+  # --- Build ---
+  - id: build-gateway
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/api-gateway:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/api-gateway:latest
+      - -f
+      - deployments/docker/Dockerfile.gateway
+      - .
+    waitFor: ['-']
+
+  - id: build-auth
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/auth-service:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/auth-service:latest
+      - -f
+      - deployments/docker/Dockerfile.auth
+      - .
+    waitFor: ['-']
+
+  - id: build-user
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/user-service:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/user-service:latest
+      - -f
+      - deployments/docker/Dockerfile.user
+      - .
+    waitFor: ['-']
+
+  - id: build-staff
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/staff-service:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/staff-service:latest
+      - -f
+      - deployments/docker/Dockerfile.staff
+      - .
+    waitFor: ['-']
+
+  - id: build-inventory
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/inventory-service:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/inventory-service:latest
+      - -f
+      - deployments/docker/Dockerfile.inventory
+      - .
+    waitFor: ['-']
+
+  # ============================================================
+  # Step 2: Push all images (after respective builds)
+  # ============================================================
+  - id: push-gateway
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/api-gateway']
+    waitFor: [build-gateway]
+
+  - id: push-auth
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/auth-service']
+    waitFor: [build-auth]
+
+  - id: push-user
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/user-service']
+    waitFor: [build-user]
+
+  - id: push-staff
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/staff-service']
+    waitFor: [build-staff]
+
+  - id: push-inventory
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/inventory-service']
+    waitFor: [build-inventory]
+
+  # ============================================================
+  # Step 3: Deploy all to Cloud Run (after respective pushes)
+  # ============================================================
+  - id: deploy-gateway
+    name: gcr.io/cloud-builders/gcloud
+    args:
+      - run
+      - deploy
+      - medflow-api-gateway
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/api-gateway:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --memory=256Mi
+      - --cpu=1
+      - --min-instances=0
+      - --max-instances=3
+      - --set-env-vars=MEDFLOW_SERVER_ENVIRONMENT=staging
+    waitFor: [push-gateway]
+
+  - id: deploy-auth
+    name: gcr.io/cloud-builders/gcloud
+    args:
+      - run
+      - deploy
+      - medflow-auth-service
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/auth-service:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --no-allow-unauthenticated
+      - --memory=256Mi
+      - --cpu=1
+      - --min-instances=0
+      - --max-instances=3
+      - --set-env-vars=MEDFLOW_SERVER_ENVIRONMENT=staging
+    waitFor: [push-auth]
+
+  - id: deploy-user
+    name: gcr.io/cloud-builders/gcloud
+    args:
+      - run
+      - deploy
+      - medflow-user-service
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/user-service:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --no-allow-unauthenticated
+      - --memory=256Mi
+      - --cpu=1
+      - --min-instances=0
+      - --max-instances=3
+      - --set-env-vars=MEDFLOW_SERVER_ENVIRONMENT=staging
+    waitFor: [push-user]
+
+  - id: deploy-staff
+    name: gcr.io/cloud-builders/gcloud
+    args:
+      - run
+      - deploy
+      - medflow-staff-service
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/staff-service:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --no-allow-unauthenticated
+      - --memory=256Mi
+      - --cpu=1
+      - --min-instances=0
+      - --max-instances=3
+      - --set-env-vars=MEDFLOW_SERVER_ENVIRONMENT=staging
+    waitFor: [push-staff]
+
+  - id: deploy-inventory
+    name: gcr.io/cloud-builders/gcloud
+    args:
+      - run
+      - deploy
+      - medflow-inventory-service
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/inventory-service:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --no-allow-unauthenticated
+      - --memory=256Mi
+      - --cpu=1
+      - --min-instances=0
+      - --max-instances=3
+      - --set-env-vars=MEDFLOW_SERVER_ENVIRONMENT=staging
+    waitFor: [push-inventory]
+
+# Push images to Artifact Registry
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/api-gateway:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/api-gateway:latest
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/auth-service:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/auth-service:latest
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/user-service:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/user-service:latest
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/staff-service:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/staff-service:latest
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/inventory-service:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/inventory-service:latest

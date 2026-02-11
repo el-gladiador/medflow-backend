@@ -103,7 +103,6 @@ type UserCreatedEvent struct {
 	// Tenant context (required for user-tenant lookup table)
 	TenantID     string `json:"tenant_id"`
 	TenantSlug   string `json:"tenant_slug"`
-	TenantSchema string `json:"tenant_schema"`
 }
 
 // FullName returns the user's full name
@@ -123,7 +122,6 @@ type UserUpdatedEvent struct {
 	// Tenant context (required for user-tenant lookup table)
 	TenantID     string `json:"tenant_id"`
 	TenantSlug   string `json:"tenant_slug"`
-	TenantSchema string `json:"tenant_schema"`
 }
 
 // UserDeletedEvent is published when a user is deleted
@@ -134,7 +132,6 @@ type UserDeletedEvent struct {
 	// Tenant context (required for user-tenant lookup table)
 	TenantID     string `json:"tenant_id"`
 	TenantSlug   string `json:"tenant_slug"`
-	TenantSchema string `json:"tenant_schema"`
 }
 
 // UserRoleChangedEvent is published when a user's role changes
@@ -180,7 +177,6 @@ type EmployeeCredentialsAddedEvent struct {
 	AddedBy      string `json:"added_by"` // Actor who added credentials
 	TenantID     string `json:"tenant_id"`
 	TenantSlug   string `json:"tenant_slug"`
-	TenantSchema string `json:"tenant_schema"`
 }
 
 // EmployeeCredentialsRemovedEvent is published when user credentials are removed from an employee
@@ -192,7 +188,6 @@ type EmployeeCredentialsRemovedEvent struct {
 	Reason       string `json:"reason,omitempty"`
 	TenantID     string `json:"tenant_id"`
 	TenantSlug   string `json:"tenant_slug"`
-	TenantSchema string `json:"tenant_schema"`
 }
 
 // Shift Events

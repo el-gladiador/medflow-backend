@@ -27,9 +27,6 @@ RUN apk --no-cache add ca-certificates tzdata
 # Copy binary from builder
 COPY --from=builder /user-service .
 
-# Copy migrations
-COPY --from=builder /app/migrations/user ./migrations
-
 # Expose port
 EXPOSE 8082
 

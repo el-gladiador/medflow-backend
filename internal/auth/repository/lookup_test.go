@@ -43,7 +43,6 @@ func createLookupTable(ctx context.Context) error {
 			user_id UUID NOT NULL,
 			tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
 			tenant_slug VARCHAR(100) NOT NULL,
-			tenant_schema VARCHAR(100) NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);
@@ -79,7 +78,6 @@ func TestUserTenantLookupRepository_Upsert(t *testing.T) {
 			UserID:       uuid.New().String(),
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		}
 
 		err := repo.Upsert(ctx, lookup)
@@ -92,7 +90,6 @@ func TestUserTenantLookupRepository_Upsert(t *testing.T) {
 		assert.Equal(t, lookup.UserID, result.UserID)
 		assert.Equal(t, lookup.TenantID, result.TenantID)
 		assert.Equal(t, lookup.TenantSlug, result.TenantSlug)
-		assert.Equal(t, lookup.TenantSchema, result.TenantSchema)
 	})
 
 	t.Run("updates existing lookup entry on conflict", func(t *testing.T) {
@@ -106,7 +103,6 @@ func TestUserTenantLookupRepository_Upsert(t *testing.T) {
 			UserID:       originalUserID,
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		})
 		require.NoError(t, err)
 
@@ -124,7 +120,6 @@ func TestUserTenantLookupRepository_Upsert(t *testing.T) {
 			UserID:       newUserID,
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		})
 		require.NoError(t, err)
 
@@ -149,7 +144,6 @@ func TestUserTenantLookupRepository_GetByEmail(t *testing.T) {
 		UserID:       uuid.New().String(),
 		TenantID:     tenant.ID,
 		TenantSlug:   tenant.Slug,
-		TenantSchema: tenant.SchemaName,
 	}
 	err := repo.Upsert(ctx, lookup)
 	require.NoError(t, err)
@@ -183,7 +177,6 @@ func TestUserTenantLookupRepository_GetByUserID(t *testing.T) {
 		UserID:       userID,
 		TenantID:     tenant.ID,
 		TenantSlug:   tenant.Slug,
-		TenantSchema: tenant.SchemaName,
 	})
 	require.NoError(t, err)
 
@@ -214,7 +207,6 @@ func TestUserTenantLookupRepository_DeleteByEmail(t *testing.T) {
 		UserID:       uuid.New().String(),
 		TenantID:     tenant.ID,
 		TenantSlug:   tenant.Slug,
-		TenantSchema: tenant.SchemaName,
 	})
 	require.NoError(t, err)
 
@@ -248,7 +240,6 @@ func TestUserTenantLookupRepository_DeleteByUserID(t *testing.T) {
 		UserID:       userID,
 		TenantID:     tenant.ID,
 		TenantSlug:   tenant.Slug,
-		TenantSchema: tenant.SchemaName,
 	})
 	require.NoError(t, err)
 
@@ -280,7 +271,6 @@ func TestUserTenantLookupRepository_UpdateEmail(t *testing.T) {
 		UserID:       userID,
 		TenantID:     tenant.ID,
 		TenantSlug:   tenant.Slug,
-		TenantSchema: tenant.SchemaName,
 	})
 	require.NoError(t, err)
 
@@ -314,7 +304,6 @@ func TestUserTenantLookupRepository_Exists(t *testing.T) {
 		UserID:       uuid.New().String(),
 		TenantID:     tenant.ID,
 		TenantSlug:   tenant.Slug,
-		TenantSchema: tenant.SchemaName,
 	})
 	require.NoError(t, err)
 
@@ -345,7 +334,6 @@ func TestUserTenantLookupRepository_CascadeDelete(t *testing.T) {
 		UserID:       uuid.New().String(),
 		TenantID:     tenant.ID,
 		TenantSlug:   tenant.Slug,
-		TenantSchema: tenant.SchemaName,
 	})
 	require.NoError(t, err)
 
@@ -395,7 +383,6 @@ func TestUserTenantLookupRepository_GetByUsername(t *testing.T) {
 		UserID:       uuid.New().String(),
 		TenantID:     tenant.ID,
 		TenantSlug:   tenant.Slug,
-		TenantSchema: tenant.SchemaName,
 	}
 	err := repo.Upsert(ctx, lookup)
 	require.NoError(t, err)
@@ -435,7 +422,6 @@ func TestUserTenantLookupRepository_GetByUsernameAndSlug(t *testing.T) {
 		UserID:       user1ID,
 		TenantID:     tenant1.ID,
 		TenantSlug:   tenant1.Slug,
-		TenantSchema: tenant1.SchemaName,
 	})
 	require.NoError(t, err)
 
@@ -447,7 +433,6 @@ func TestUserTenantLookupRepository_GetByUsernameAndSlug(t *testing.T) {
 		UserID:       user2ID,
 		TenantID:     tenant2.ID,
 		TenantSlug:   tenant2.Slug,
-		TenantSchema: tenant2.SchemaName,
 	})
 	require.NoError(t, err)
 
@@ -486,7 +471,6 @@ func TestUserTenantLookupRepository_GetByUsernameAndSlug(t *testing.T) {
 			UserID:       uuid.New().String(),
 			TenantID:     tenant1.ID,
 			TenantSlug:   tenant1.Slug,
-			TenantSchema: tenant1.SchemaName,
 		})
 		require.NoError(t, err)
 
@@ -512,7 +496,6 @@ func TestUserTenantLookupRepository_UsernameUpsert(t *testing.T) {
 			UserID:       uuid.New().String(),
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		}
 
 		err := repo.Upsert(ctx, lookup)
@@ -536,7 +519,6 @@ func TestUserTenantLookupRepository_UsernameUpsert(t *testing.T) {
 			UserID:       uuid.New().String(),
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		})
 		require.NoError(t, err)
 
@@ -547,7 +529,6 @@ func TestUserTenantLookupRepository_UsernameUpsert(t *testing.T) {
 			UserID:       uuid.New().String(),
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		})
 		require.NoError(t, err)
 
@@ -564,7 +545,6 @@ func TestUserTenantLookupRepository_UsernameUpsert(t *testing.T) {
 			UserID:       uuid.New().String(),
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		}
 
 		err := repo.Upsert(ctx, lookup)
@@ -608,7 +588,6 @@ func TestUserTenantLookupRepository_TenantIsolation(t *testing.T) {
 			UserID:       userID,
 			TenantID:     tenant.tenant.ID,
 			TenantSlug:   tenant.tenant.Slug,
-			TenantSchema: tenant.tenant.SchemaName,
 		})
 		require.NoError(t, err, "failed to create user %d", i)
 	}

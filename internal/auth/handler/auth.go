@@ -109,9 +109,8 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	// Extract tenant headers (set by API Gateway's AuthMiddleware)
 	tenantID := r.Header.Get("X-Tenant-ID")
 	tenantSlug := r.Header.Get("X-Tenant-Slug")
-	tenantSchema := r.Header.Get("X-Tenant-Schema")
 
-	user, err := h.service.GetCurrentUser(r.Context(), userID, tenantID, tenantSlug, tenantSchema)
+	user, err := h.service.GetCurrentUser(r.Context(), userID, tenantID, tenantSlug)
 	if err != nil {
 		httputil.Error(w, err)
 		return

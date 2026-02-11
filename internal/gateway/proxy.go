@@ -132,28 +132,23 @@ func (p *Proxy) AuthMiddleware(next http.Handler) http.Handler {
 		email, _ := claims["email"].(string)
 		role, _ := claims["role"].(string)
 
-		// Extract tenant info from claims (NEW - multi-tenancy support)
+		// Extract tenant info from claims (RLS-based multi-tenancy)
 		tenantID, _ := claims["tenant_id"].(string)
 		tenantSlug, _ := claims["tenant_slug"].(string)
-		tenantSchema, _ := claims["tenant_schema"].(string)
 
-		// Validate tenant context is present (CRITICAL for multi-tenancy security)
-		// For now, we log a warning for old tokens without tenant context
-		// TODO: Uncomment the error return below to enforce tenant requirement after full rollout
-		if tenantID == "" || tenantSchema == "" {
+		// Validate tenant ID is present (CRITICAL for RLS-based multi-tenancy)
+		if tenantID == "" {
 			p.log.Warn().
 				Str("user_id", userID).
-				Msg("JWT missing tenant context - old token or misconfigured")
-			// pkghttp.Error(w, errors.Forbidden("missing tenant context in token"))
-			// return
+				Msg("JWT missing tenant_id - old token or misconfigured")
 		}
 
 		// Add user info to request context
 		ctx := pkghttp.WithUserContext(r.Context(), userID, email, role)
 
-		// Add tenant info to request context (NEW)
+		// Add tenant info to request context
 		if tenantID != "" {
-			ctx = tenant.WithTenantContext(ctx, tenantID, tenantSlug, tenantSchema)
+			ctx = tenant.WithTenantContext(ctx, tenantID, tenantSlug)
 		}
 
 		// Add user info to headers for downstream services
@@ -161,11 +156,10 @@ func (p *Proxy) AuthMiddleware(next http.Handler) http.Handler {
 		r.Header.Set("X-User-Email", email)
 		r.Header.Set("X-User-Role", role)
 
-		// Add tenant info to headers for downstream services (NEW)
+		// Add tenant info to headers for downstream services
 		if tenantID != "" {
 			r.Header.Set("X-Tenant-ID", tenantID)
 			r.Header.Set("X-Tenant-Slug", tenantSlug)
-			r.Header.Set("X-Tenant-Schema", tenantSchema)
 		}
 
 		// Add permissions if present

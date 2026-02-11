@@ -35,6 +35,23 @@ func New(cfg *config.RabbitMQConfig, log *logger.Logger) (*RabbitMQ, error) {
 	return rmq, nil
 }
 
+// NewOptional creates a RabbitMQ connection if the URL is configured and reachable.
+// Returns nil (not an error) if the URL is empty or connection fails.
+// Use this for deployments where messaging is not yet available (e.g., Cloud Run without RabbitMQ).
+func NewOptional(cfg *config.RabbitMQConfig, log *logger.Logger) *RabbitMQ {
+	if cfg.URL == "" || cfg.URL == "amqp://medflow:devpassword@localhost:5672/" {
+		log.Warn().Msg("RabbitMQ URL not configured, messaging disabled")
+		return nil
+	}
+
+	rmq, err := New(cfg, log)
+	if err != nil {
+		log.Warn().Err(err).Msg("RabbitMQ connection failed, messaging disabled")
+		return nil
+	}
+	return rmq
+}
+
 func (r *RabbitMQ) connect() error {
 	var err error
 

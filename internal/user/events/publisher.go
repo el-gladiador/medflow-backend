@@ -30,10 +30,11 @@ func NewUserEventPublisher(rmq *messaging.RabbitMQ, log *logger.Logger) (*UserEv
 
 // PublishUserCreated publishes a user created event
 func (p *UserEventPublisher) PublishUserCreated(ctx context.Context, user *domain.User) {
-	// Extract tenant context for user-tenant lookup table sync
+	if p == nil {
+		return
+	}
 	tenantID, _ := tenant.TenantID(ctx)
 	tenantSlug, _ := tenant.TenantSlug(ctx)
-	tenantSchema, _ := tenant.TenantSchema(ctx)
 
 	roleName := ""
 	if user.Role != nil {
@@ -41,15 +42,14 @@ func (p *UserEventPublisher) PublishUserCreated(ctx context.Context, user *domai
 	}
 
 	data := messaging.UserCreatedEvent{
-		UserID:       user.ID,
-		Email:        user.Email,
-		Username:     user.Username,
-		FirstName:    user.FirstName,
-		LastName:     user.LastName,
-		RoleName:     roleName,
-		TenantID:     tenantID,
-		TenantSlug:   tenantSlug,
-		TenantSchema: tenantSchema,
+		UserID:     user.ID,
+		Email:      user.Email,
+		Username:   user.Username,
+		FirstName:  user.FirstName,
+		LastName:   user.LastName,
+		RoleName:   roleName,
+		TenantID:   tenantID,
+		TenantSlug: tenantSlug,
 	}
 
 	if err := p.publisher.Publish(ctx, messaging.EventUserCreated, data); err != nil {
@@ -60,17 +60,17 @@ func (p *UserEventPublisher) PublishUserCreated(ctx context.Context, user *domai
 // PublishUserUpdated publishes a user updated event
 // If oldEmail is provided (non-empty), it indicates an email change
 func (p *UserEventPublisher) PublishUserUpdated(ctx context.Context, user *domain.User, changes map[string]interface{}, oldEmail string) {
-	// Extract tenant context for user-tenant lookup table sync
+	if p == nil {
+		return
+	}
 	tenantID, _ := tenant.TenantID(ctx)
 	tenantSlug, _ := tenant.TenantSlug(ctx)
-	tenantSchema, _ := tenant.TenantSchema(ctx)
 
 	data := messaging.UserUpdatedEvent{
-		UserID:       user.ID,
-		Fields:       changes,
-		TenantID:     tenantID,
-		TenantSlug:   tenantSlug,
-		TenantSchema: tenantSchema,
+		UserID:     user.ID,
+		Fields:     changes,
+		TenantID:   tenantID,
+		TenantSlug: tenantSlug,
 	}
 
 	// Track email changes for lookup table updates
@@ -87,17 +87,17 @@ func (p *UserEventPublisher) PublishUserUpdated(ctx context.Context, user *domai
 // PublishUserDeleted publishes a user deleted event
 // email is required for removing the user from the tenant lookup table
 func (p *UserEventPublisher) PublishUserDeleted(ctx context.Context, userID, email string) {
-	// Extract tenant context for user-tenant lookup table sync
+	if p == nil {
+		return
+	}
 	tenantID, _ := tenant.TenantID(ctx)
 	tenantSlug, _ := tenant.TenantSlug(ctx)
-	tenantSchema, _ := tenant.TenantSchema(ctx)
 
 	data := messaging.UserDeletedEvent{
-		UserID:       userID,
-		Email:        email,
-		TenantID:     tenantID,
-		TenantSlug:   tenantSlug,
-		TenantSchema: tenantSchema,
+		UserID:     userID,
+		Email:      email,
+		TenantID:   tenantID,
+		TenantSlug: tenantSlug,
 	}
 
 	if err := p.publisher.Publish(ctx, messaging.EventUserDeleted, data); err != nil {
@@ -107,6 +107,9 @@ func (p *UserEventPublisher) PublishUserDeleted(ctx context.Context, userID, ema
 
 // PublishUserRoleChanged publishes a user role changed event
 func (p *UserEventPublisher) PublishUserRoleChanged(ctx context.Context, userID, oldRole, newRole string) {
+	if p == nil {
+		return
+	}
 	data := messaging.UserRoleChangedEvent{
 		UserID:      userID,
 		OldRoleName: oldRole,

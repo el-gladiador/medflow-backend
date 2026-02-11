@@ -46,7 +46,6 @@ func createLookupTable(ctx context.Context) error {
 			user_id UUID NOT NULL,
 			tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
 			tenant_slug VARCHAR(100) NOT NULL,
-			tenant_schema VARCHAR(100) NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);
@@ -88,7 +87,6 @@ func TestUserEventHandler_HandleUserCreated(t *testing.T) {
 			RoleName:     "staff",
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		}
 
 		payload, err := json.Marshal(eventData)
@@ -110,7 +108,6 @@ func TestUserEventHandler_HandleUserCreated(t *testing.T) {
 		assert.Equal(t, userID, lookup.UserID)
 		assert.Equal(t, tenant.ID, lookup.TenantID)
 		assert.Equal(t, tenant.Slug, lookup.TenantSlug)
-		assert.Equal(t, tenant.SchemaName, lookup.TenantSchema)
 	})
 
 	t.Run("returns error for missing tenant context", func(t *testing.T) {
@@ -153,11 +150,10 @@ func TestUserEventHandler_HandleUserUpdated(t *testing.T) {
 
 		// Create initial lookup entry
 		err := lookupRepo.Upsert(ctx, &repository.UserTenantLookup{
-			Email:        oldEmail,
-			UserID:       userID,
-			TenantID:     tenant.ID,
-			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
+			Email:      oldEmail,
+			UserID:     userID,
+			TenantID:   tenant.ID,
+			TenantSlug: tenant.Slug,
 		})
 		require.NoError(t, err)
 
@@ -169,7 +165,6 @@ func TestUserEventHandler_HandleUserUpdated(t *testing.T) {
 			NewEmail:     &newEmail,
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		}
 
 		payload, err := json.Marshal(eventData)
@@ -201,11 +196,10 @@ func TestUserEventHandler_HandleUserUpdated(t *testing.T) {
 
 		// Create initial lookup entry
 		err := lookupRepo.Upsert(ctx, &repository.UserTenantLookup{
-			Email:        email,
-			UserID:       userID,
-			TenantID:     tenant.ID,
-			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
+			Email:      email,
+			UserID:     userID,
+			TenantID:   tenant.ID,
+			TenantSlug: tenant.Slug,
 		})
 		require.NoError(t, err)
 
@@ -215,7 +209,6 @@ func TestUserEventHandler_HandleUserUpdated(t *testing.T) {
 			Fields:       map[string]any{"first_name": "Updated"},
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		}
 
 		payload, err := json.Marshal(eventData)
@@ -251,11 +244,10 @@ func TestUserEventHandler_HandleUserDeleted(t *testing.T) {
 
 		// Create lookup entry
 		err := lookupRepo.Upsert(ctx, &repository.UserTenantLookup{
-			Email:        email,
-			UserID:       userID,
-			TenantID:     tenant.ID,
-			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
+			Email:      email,
+			UserID:     userID,
+			TenantID:   tenant.ID,
+			TenantSlug: tenant.Slug,
 		})
 		require.NoError(t, err)
 
@@ -265,7 +257,6 @@ func TestUserEventHandler_HandleUserDeleted(t *testing.T) {
 			Email:        email,
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		}
 
 		payload, err := json.Marshal(eventData)
@@ -291,11 +282,10 @@ func TestUserEventHandler_HandleUserDeleted(t *testing.T) {
 
 		// Create lookup entry
 		err := lookupRepo.Upsert(ctx, &repository.UserTenantLookup{
-			Email:        email,
-			UserID:       userID,
-			TenantID:     tenant.ID,
-			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
+			Email:      email,
+			UserID:     userID,
+			TenantID:   tenant.ID,
+			TenantSlug: tenant.Slug,
 		})
 		require.NoError(t, err)
 
@@ -304,7 +294,6 @@ func TestUserEventHandler_HandleUserDeleted(t *testing.T) {
 			UserID:       userID,
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		}
 
 		payload, err := json.Marshal(eventData)

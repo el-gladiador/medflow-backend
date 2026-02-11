@@ -59,7 +59,7 @@ func (c *UserEventConsumer) handleUserCreated(ctx context.Context, event *messag
 		Msg("received user created event")
 
 	// Create tenant context from event data
-	ctx = tenant.WithTenantContext(ctx, data.TenantID, data.TenantSlug, data.TenantSchema)
+	ctx = tenant.WithTenantContext(ctx, data.TenantID, data.TenantSlug)
 
 	return c.userCacheRepo.Set(ctx, &repository.CachedUser{
 		UserID:    data.UserID,
@@ -82,7 +82,7 @@ func (c *UserEventConsumer) handleUserUpdated(ctx context.Context, event *messag
 		Msg("received user updated event")
 
 	// Create tenant context from event data
-	ctx = tenant.WithTenantContext(ctx, data.TenantID, data.TenantSlug, data.TenantSchema)
+	ctx = tenant.WithTenantContext(ctx, data.TenantID, data.TenantSlug)
 
 	existing, _ := c.userCacheRepo.Get(ctx, data.UserID)
 	if existing == nil {
@@ -115,7 +115,7 @@ func (c *UserEventConsumer) handleUserDeleted(ctx context.Context, event *messag
 		Msg("received user deleted event")
 
 	// Create tenant context from event data
-	ctx = tenant.WithTenantContext(ctx, data.TenantID, data.TenantSlug, data.TenantSchema)
+	ctx = tenant.WithTenantContext(ctx, data.TenantID, data.TenantSlug)
 
 	return c.userCacheRepo.Delete(ctx, data.UserID)
 }

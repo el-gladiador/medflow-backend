@@ -16,10 +16,10 @@ func TestDatabaseConfig_DSN(t *testing.T) {
 			config: DatabaseConfig{
 				URL:      "postgres://user:pass@urlhost:5432/urldb?sslmode=require",
 				Host:     "localhost",
-				Port:     5433,
-				User:     "medflow",
+				Port:     5432,
+				User:     "medflow_app",
 				Password: "devpassword",
-				Database: "medflow_auth",
+				Database: "medflow",
 				SSLMode:  "disable",
 			},
 			want: "host=urlhost port=5432 user=user password=pass dbname=urldb sslmode=require",
@@ -29,13 +29,13 @@ func TestDatabaseConfig_DSN(t *testing.T) {
 			config: DatabaseConfig{
 				URL:      "",
 				Host:     "localhost",
-				Port:     5433,
-				User:     "medflow",
+				Port:     5432,
+				User:     "medflow_app",
 				Password: "devpassword",
-				Database: "medflow_auth",
+				Database: "medflow",
 				SSLMode:  "disable",
 			},
-			want: "host=localhost port=5433 user=medflow password=devpassword dbname=medflow_auth sslmode=disable",
+			want: "host=localhost port=5432 user=medflow_app password=devpassword dbname=medflow sslmode=disable",
 		},
 	}
 
@@ -149,11 +149,11 @@ func TestLoad(t *testing.T) {
 	if cfg.Database.Host != "localhost" {
 		t.Errorf("Database.Host = %v, want localhost", cfg.Database.Host)
 	}
-	if cfg.Database.Port != 5433 {
-		t.Errorf("Database.Port = %v, want 5433", cfg.Database.Port)
+	if cfg.Database.Port != 5432 {
+		t.Errorf("Database.Port = %v, want 5432", cfg.Database.Port)
 	}
-	if cfg.Database.Database != "medflow_auth" {
-		t.Errorf("Database.Database = %v, want medflow_auth", cfg.Database.Database)
+	if cfg.Database.Database != "medflow" {
+		t.Errorf("Database.Database = %v, want medflow", cfg.Database.Database)
 	}
 }
 

@@ -86,16 +86,42 @@ func MockRows(columns ...string) *sqlmock.Rows {
 	return sqlmock.NewRows(columns)
 }
 
-// ExpectTenantQuery sets up expectations for a tenant-scoped query.
-// This handles the transaction + SET search_path pattern.
+// ExpectTenantQuery sets up expectations for a tenant-scoped query using RLS.
+// This handles the transaction + SET LOCAL search_path + SET LOCAL app.current_tenant pattern.
 //
 // Usage:
 //
-//	mockDB.ExpectTenantQuery("tenant_test",
+//	mockDB.ExpectTenantQuery("users, public", "test-tenant-id",
 //	    "SELECT * FROM users WHERE id = $1",
 //	    testutil.MockRows("id", "email").AddRow(userID, email),
 //	)
-func (m *MockDB) ExpectTenantQuery(schema, query string, rows *sqlmock.Rows) {
+func (m *MockDB) ExpectTenantQuery(searchPath, tenantID, query string, rows *sqlmock.Rows) {
+	m.Mock.ExpectBegin()
+	m.Mock.ExpectExec(regexp.QuoteMeta("SET LOCAL search_path TO " + searchPath)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	m.Mock.ExpectExec(regexp.QuoteMeta("SET LOCAL app.current_tenant = $1")).
+		WithArgs(tenantID).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	m.Mock.ExpectQuery(regexp.QuoteMeta(query)).WillReturnRows(rows)
+	m.Mock.ExpectCommit()
+}
+
+// ExpectTenantExec sets up expectations for a tenant-scoped exec using RLS.
+// This handles the transaction + SET LOCAL search_path + SET LOCAL app.current_tenant pattern.
+func (m *MockDB) ExpectTenantExec(searchPath, tenantID, query string, result driver.Result) {
+	m.Mock.ExpectBegin()
+	m.Mock.ExpectExec(regexp.QuoteMeta("SET LOCAL search_path TO " + searchPath)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	m.Mock.ExpectExec(regexp.QuoteMeta("SET LOCAL app.current_tenant = $1")).
+		WithArgs(tenantID).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	m.Mock.ExpectExec(regexp.QuoteMeta(query)).WillReturnResult(result)
+	m.Mock.ExpectCommit()
+}
+
+// Deprecated: ExpectTenantQuerySchema uses the old schema-per-tenant pattern.
+// Use ExpectTenantQuery with RLS instead.
+func (m *MockDB) ExpectTenantQuerySchema(schema, query string, rows *sqlmock.Rows) {
 	m.Mock.ExpectBegin()
 	m.Mock.ExpectExec(regexp.QuoteMeta("SET LOCAL search_path TO " + schema + ", public")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -103,9 +129,9 @@ func (m *MockDB) ExpectTenantQuery(schema, query string, rows *sqlmock.Rows) {
 	m.Mock.ExpectCommit()
 }
 
-// ExpectTenantExec sets up expectations for a tenant-scoped exec.
-// This handles the transaction + SET search_path pattern.
-func (m *MockDB) ExpectTenantExec(schema, query string, result driver.Result) {
+// Deprecated: ExpectTenantExecSchema uses the old schema-per-tenant pattern.
+// Use ExpectTenantExec with RLS instead.
+func (m *MockDB) ExpectTenantExecSchema(schema, query string, result driver.Result) {
 	m.Mock.ExpectBegin()
 	m.Mock.ExpectExec(regexp.QuoteMeta("SET LOCAL search_path TO " + schema + ", public")).
 		WillReturnResult(sqlmock.NewResult(0, 0))

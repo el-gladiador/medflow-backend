@@ -46,7 +46,6 @@ func createAuthTables(ctx context.Context) error {
 			user_id UUID NOT NULL,
 			tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
 			tenant_slug VARCHAR(100) NOT NULL,
-			tenant_schema VARCHAR(100) NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);
@@ -95,7 +94,6 @@ func TestSubdomainLogin_SameUsernameMultipleTenants(t *testing.T) {
 		UserID:       adminAID,
 		TenantID:     clinicA.ID,
 		TenantSlug:   clinicA.Slug,
-		TenantSchema: clinicA.SchemaName,
 	})
 	require.NoError(t, err)
 
@@ -106,7 +104,6 @@ func TestSubdomainLogin_SameUsernameMultipleTenants(t *testing.T) {
 		UserID:       adminBID,
 		TenantID:     clinicB.ID,
 		TenantSlug:   clinicB.Slug,
-		TenantSchema: clinicB.SchemaName,
 	})
 	require.NoError(t, err)
 
@@ -155,7 +152,6 @@ func TestSubdomainLogin_EmailLogin(t *testing.T) {
 		UserID:       uuid.New().String(),
 		TenantID:     clinic.ID,
 		TenantSlug:   clinic.Slug,
-		TenantSchema: clinic.SchemaName,
 	})
 	require.NoError(t, err)
 
@@ -220,7 +216,6 @@ func TestSubdomainLogin_TenantIsolation(t *testing.T) {
 			UserID:       userID,
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		})
 		require.NoError(t, err)
 	}
@@ -252,9 +247,6 @@ func TestSubdomainLogin_TenantIsolation(t *testing.T) {
 			// Email must match the tenant
 			expectedEmail := "receptionist@" + tenant.Slug + ".de"
 			assert.Equal(t, expectedEmail, result.Email)
-
-			// Schema must match
-			assert.Equal(t, tenant.SchemaName, result.TenantSchema)
 		}
 	})
 }
@@ -278,7 +270,6 @@ func TestSubdomainLogin_EdgeCases(t *testing.T) {
 			UserID:       uuid.New().String(),
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		})
 		require.NoError(t, err)
 
@@ -296,7 +287,6 @@ func TestSubdomainLogin_EdgeCases(t *testing.T) {
 			UserID:       uuid.New().String(),
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		})
 		require.NoError(t, err)
 
@@ -313,7 +303,6 @@ func TestSubdomainLogin_EdgeCases(t *testing.T) {
 			UserID:       uuid.New().String(),
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		})
 		require.NoError(t, err)
 
@@ -334,7 +323,6 @@ func TestSubdomainLogin_EdgeCases(t *testing.T) {
 			UserID:       uuid.New().String(),
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		})
 		require.NoError(t, err)
 

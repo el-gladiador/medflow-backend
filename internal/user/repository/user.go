@@ -25,9 +25,9 @@ func NewUserRepository(db *database.DB) *UserRepository {
 }
 
 // Create creates a new user
-// TENANT-ISOLATED: Inserts into the tenant's schema
+// TENANT-ISOLATED: Inserts with tenant_id for RLS filtering
 func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -41,15 +41,16 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
 		user.Status = "active"
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-			INSERT INTO users (id, email, username, password_hash, first_name, last_name, avatar_url, status)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			INSERT INTO users (id, tenant_id, email, username, password_hash, first_name, last_name, avatar_url, status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			RETURNING created_at, updated_at
 		`
 
 		return r.db.QueryRowxContext(ctx, query,
 			user.ID,
+			tenantID,
 			user.Email,
 			user.Username,
 			user.PasswordHash,
@@ -62,15 +63,15 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
 }
 
 // GetByID gets a user by ID
-// TENANT-ISOLATED: Queries only the tenant's schema
+// TENANT-ISOLATED: Queries with RLS filtering by tenant
 func (r *UserRepository) GetByID(ctx context.Context, id string) (*domain.User, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var user domain.User
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, email, username, password_hash, first_name, last_name, avatar_url, status,
 			       created_at, updated_at, last_login_at, deleted_at
@@ -110,15 +111,15 @@ func (r *UserRepository) GetByID(ctx context.Context, id string) (*domain.User, 
 }
 
 // GetByEmail gets a user by email
-// TENANT-ISOLATED: Queries only the tenant's schema
+// TENANT-ISOLATED: Queries with RLS filtering by tenant
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var user domain.User
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, email, username, password_hash, first_name, last_name, avatar_url, status,
 			       created_at, updated_at, last_login_at, deleted_at
@@ -158,15 +159,15 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.
 }
 
 // GetByUsername gets a user by username
-// TENANT-ISOLATED: Queries only the tenant's schema
+// TENANT-ISOLATED: Queries with RLS filtering by tenant
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var user domain.User
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, email, username, password_hash, first_name, last_name, avatar_url, status,
 			       created_at, updated_at, last_login_at, deleted_at
@@ -225,9 +226,9 @@ func (r *UserRepository) GetWithRole(ctx context.Context, id string) (*domain.Us
 }
 
 // List lists all users with pagination
-// TENANT-ISOLATED: Returns only users from the tenant's schema
+// TENANT-ISOLATED: Returns only users visible to the tenant via RLS
 func (r *UserRepository) List(ctx context.Context, page, perPage int) ([]*domain.User, int64, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -235,7 +236,7 @@ func (r *UserRepository) List(ctx context.Context, page, perPage int) ([]*domain
 	var total int64
 	var users []*domain.User
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// Count total
 		countQuery := `SELECT COUNT(*) FROM users WHERE deleted_at IS NULL`
 		if err := r.db.GetContext(ctx, &total, countQuery); err != nil {
@@ -324,14 +325,14 @@ func (r *UserRepository) List(ctx context.Context, page, perPage int) ([]*domain
 }
 
 // Update updates a user
-// TENANT-ISOLATED: Updates only in the tenant's schema
+// TENANT-ISOLATED: Updates only rows visible to the tenant via RLS
 func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE users
 			SET email = $2, first_name = $3, last_name = $4, avatar_url = $5, status = $6
@@ -360,14 +361,14 @@ func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
 }
 
 // UpdatePassword updates a user's password
-// TENANT-ISOLATED: Updates only in the tenant's schema
+// TENANT-ISOLATED: Updates only rows visible to the tenant via RLS
 func (r *UserRepository) UpdatePassword(ctx context.Context, id, passwordHash string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `UPDATE users SET password_hash = $2 WHERE id = $1 AND deleted_at IS NULL`
 		_, err := r.db.ExecContext(ctx, query, id, passwordHash)
 		return err
@@ -375,14 +376,14 @@ func (r *UserRepository) UpdatePassword(ctx context.Context, id, passwordHash st
 }
 
 // UpdateLastLogin updates the last login timestamp
-// TENANT-ISOLATED: Updates only in the tenant's schema
+// TENANT-ISOLATED: Updates only rows visible to the tenant via RLS
 func (r *UserRepository) UpdateLastLogin(ctx context.Context, id string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `UPDATE users SET last_login_at = NOW() WHERE id = $1`
 		_, err := r.db.ExecContext(ctx, query, id)
 		return err
@@ -390,14 +391,14 @@ func (r *UserRepository) UpdateLastLogin(ctx context.Context, id string) error {
 }
 
 // SoftDelete soft deletes a user
-// TENANT-ISOLATED: Soft deletes only in the tenant's schema
+// TENANT-ISOLATED: Soft deletes only rows visible to the tenant via RLS
 func (r *UserRepository) SoftDelete(ctx context.Context, id string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `UPDATE users SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
 		result, err := r.db.ExecContext(ctx, query, id)
 		if err != nil {
@@ -414,9 +415,9 @@ func (r *UserRepository) SoftDelete(ctx context.Context, id string) error {
 }
 
 // AddPermissionOverride adds a permission override
-// TENANT-ISOLATED: Inserts/updates only in the tenant's schema
+// TENANT-ISOLATED: Inserts/updates with tenant_id for RLS filtering
 func (r *UserRepository) AddPermissionOverride(ctx context.Context, override *domain.PermissionOverride) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -425,16 +426,17 @@ func (r *UserRepository) AddPermissionOverride(ctx context.Context, override *do
 		override.ID = uuid.New().String()
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-			INSERT INTO permission_overrides (id, user_id, permission_id, granted, granted_by, granted_at, reason, expires_at)
-			VALUES ($1, $2, (SELECT id FROM permissions WHERE name = $3), $4, $5, NOW(), $6, $7)
+			INSERT INTO permission_overrides (id, tenant_id, user_id, permission_id, granted, granted_by, granted_at, reason, expires_at)
+			VALUES ($1, $2, $3, (SELECT id FROM permissions WHERE name = $4), $5, $6, NOW(), $7, $8)
 			ON CONFLICT (user_id, permission_id)
-			DO UPDATE SET granted = $4, granted_by = $5, granted_at = NOW(), reason = $6, expires_at = $7
+			DO UPDATE SET granted = $5, granted_by = $6, granted_at = NOW(), reason = $7, expires_at = $8
 		`
 
 		_, err := r.db.ExecContext(ctx, query,
 			override.ID,
+			tenantID,
 			override.UserID,
 			override.Permission,
 			override.Granted,
@@ -448,14 +450,14 @@ func (r *UserRepository) AddPermissionOverride(ctx context.Context, override *do
 }
 
 // RemovePermissionOverride removes a permission override
-// TENANT-ISOLATED: Deletes only from the tenant's schema
+// TENANT-ISOLATED: Deletes only rows visible to the tenant via RLS
 func (r *UserRepository) RemovePermissionOverride(ctx context.Context, userID, permission string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			DELETE FROM permission_overrides
 			WHERE user_id = $1 AND permission_id = (SELECT id FROM permissions WHERE name = $2)
@@ -466,14 +468,14 @@ func (r *UserRepository) RemovePermissionOverride(ctx context.Context, userID, p
 }
 
 // SetAccessGiverScope sets the access giver scope for a user
-// TENANT-ISOLATED: Updates only in the tenant's schema
+// TENANT-ISOLATED: Updates only rows visible to the tenant via RLS
 func (r *UserRepository) SetAccessGiverScope(ctx context.Context, userID string, roleNames []string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// Clear existing scope
 		_, err := r.db.ExecContext(ctx, `DELETE FROM access_giver_scope WHERE user_id = $1`, userID)
 		if err != nil {
@@ -483,9 +485,9 @@ func (r *UserRepository) SetAccessGiverScope(ctx context.Context, userID string,
 		// Add new scope
 		for _, roleName := range roleNames {
 			_, err := r.db.ExecContext(ctx, `
-				INSERT INTO access_giver_scope (user_id, role_id)
-				SELECT $1, id FROM roles WHERE name = $2
-			`, userID, roleName)
+				INSERT INTO access_giver_scope (user_id, role_id, tenant_id)
+				SELECT $1, id, $3 FROM roles WHERE name = $2
+			`, userID, roleName, tenantID)
 			if err != nil {
 				return err
 			}
@@ -496,14 +498,14 @@ func (r *UserRepository) SetAccessGiverScope(ctx context.Context, userID string,
 }
 
 // ClearAccessGiverScope clears the access giver scope
-// TENANT-ISOLATED: Deletes only from the tenant's schema
+// TENANT-ISOLATED: Deletes only rows visible to the tenant via RLS
 func (r *UserRepository) ClearAccessGiverScope(ctx context.Context, userID string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		_, err := r.db.ExecContext(ctx, `DELETE FROM access_giver_scope WHERE user_id = $1`, userID)
 		return err
 	})
@@ -511,21 +513,20 @@ func (r *UserRepository) ClearAccessGiverScope(ctx context.Context, userID strin
 
 // TenantInfo holds tenant metadata
 type TenantInfo struct {
-	ID         string
-	Slug       string
-	SchemaName string
+	ID   string
+	Slug string
 }
 
 // GetUserWithRoleFromJunction fetches user with their role from user_roles junction table
 // This is used after FindUserAcrossTenants since that doesn't know the role yet
 func (r *UserRepository) GetUserWithRoleFromJunction(ctx context.Context, userID string) (*domain.User, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var user domain.User
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// Get user basic info
 		userQuery := `
 			SELECT id, email, first_name, last_name, avatar_url, status, created_at, updated_at, last_login_at
@@ -621,14 +622,14 @@ func (r *UserRepository) GetUserWithRoleFromJunction(ctx context.Context, userID
 }
 
 // AssignRole assigns a role to a user via the user_roles junction table
-// TENANT-ISOLATED: Inserts only into the tenant's schema
+// TENANT-ISOLATED: Inserts with tenant_id for RLS filtering
 func (r *UserRepository) AssignRole(ctx context.Context, userID, roleID string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// First, remove any existing role assignments for this user
 		_, err := r.db.ExecContext(ctx, `DELETE FROM user_roles WHERE user_id = $1`, userID)
 		if err != nil {
@@ -636,8 +637,8 @@ func (r *UserRepository) AssignRole(ctx context.Context, userID, roleID string) 
 		}
 
 		// Insert the new role assignment
-		query := `INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)`
-		_, err = r.db.ExecContext(ctx, query, userID, roleID)
+		query := `INSERT INTO user_roles (user_id, role_id, tenant_id) VALUES ($1, $2, $3)`
+		_, err = r.db.ExecContext(ctx, query, userID, roleID, tenantID)
 		if err != nil {
 			return fmt.Errorf("failed to assign role: %w", err)
 		}
@@ -646,90 +647,65 @@ func (r *UserRepository) AssignRole(ctx context.Context, userID, roleID string) 
 	})
 }
 
-// FindUserAcrossTenants searches all active tenant schemas for a user by email.
+// FindUserAcrossTenants searches all tenants for a user by email.
 // This is used ONLY during login to determine which tenant owns the email.
 // Returns the user and the tenant information.
 //
-// Performance: O(N) where N is number of active tenants.
-// With 100 tenants and email index, typically < 100ms worst case.
+// With RLS-based isolation, all users are in one table with tenant_id.
+// A direct query WITHOUT RLS wrapping finds the user and their tenant in one step.
 //
 // Security: Only searches active/trial tenants. Suspended tenants are excluded.
 func (r *UserRepository) FindUserAcrossTenants(ctx context.Context, email string) (*domain.User, *TenantInfo, error) {
-	// Step 1: Get all active tenants from auth DB
-	var tenants []TenantInfo
-	tenantsQuery := `
-		SELECT id, slug, schema_name
-		FROM public.tenants
-		WHERE deleted_at IS NULL
-		  AND subscription_status IN ('active', 'trial')
-		ORDER BY created_at ASC
+	// Direct cross-tenant query without RLS wrapping.
+	// Joins users with tenants to find the user and their tenant in a single query.
+	query := `
+		SELECT u.id, u.email, u.username, u.password_hash, u.first_name, u.last_name,
+		       u.avatar_url, u.status, u.created_at, u.updated_at, u.last_login_at,
+		       t.id AS tenant_id, t.slug AS tenant_slug
+		FROM users u
+		JOIN public.tenants t ON t.id = u.tenant_id
+		WHERE u.email = $1
+		  AND u.deleted_at IS NULL
+		  AND u.status = 'active'
+		  AND t.deleted_at IS NULL
+		  AND t.subscription_status IN ('active', 'trial')
+		LIMIT 1
 	`
 
-	rows, err := r.db.QueryContext(ctx, tenantsQuery)
+	var user domain.User
+	var avatarURL sql.NullString
+	var username sql.NullString
+	var tenantInfo TenantInfo
+
+	err := r.db.QueryRowContext(ctx, query, email).Scan(
+		&user.ID,
+		&user.Email,
+		&username,
+		&user.PasswordHash,
+		&user.FirstName,
+		&user.LastName,
+		&avatarURL,
+		&user.Status,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+		&user.LastLoginAt,
+		&tenantInfo.ID,
+		&tenantInfo.Slug,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil, errors.InvalidCredentials()
+	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to query tenants: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var t TenantInfo
-		if err := rows.Scan(&t.ID, &t.Slug, &t.SchemaName); err != nil {
-			continue
-		}
-		tenants = append(tenants, t)
+		return nil, nil, fmt.Errorf("failed to find user across tenants: %w", err)
 	}
 
-	if len(tenants) == 0 {
-		return nil, nil, errors.NotFound("no active tenants found")
+	if avatarURL.Valid {
+		user.AvatarURL = &avatarURL.String
+	}
+	if username.Valid {
+		user.Username = &username.String
 	}
 
-	// Step 2: Search each tenant schema for the email
-	for _, tenantInfo := range tenants {
-		// Query the tenant's schema for this email
-		userQuery := fmt.Sprintf(`
-			SELECT id, email, username, password_hash, first_name, last_name, avatar_url, status,
-			       created_at, updated_at, last_login_at
-			FROM %s.users
-			WHERE email = $1 AND deleted_at IS NULL AND status = 'active'
-			LIMIT 1
-		`, tenantInfo.SchemaName)
-
-		var user domain.User
-		var avatarURL sql.NullString
-		var username sql.NullString
-
-		err := r.db.QueryRowContext(ctx, userQuery, email).Scan(
-			&user.ID,
-			&user.Email,
-			&username,
-			&user.PasswordHash,
-			&user.FirstName,
-			&user.LastName,
-			&avatarURL,
-			&user.Status,
-			&user.CreatedAt,
-			&user.UpdatedAt,
-			&user.LastLoginAt,
-		)
-
-		if err == nil {
-			// Found the user in this tenant
-			if avatarURL.Valid {
-				user.AvatarURL = &avatarURL.String
-			}
-			if username.Valid {
-				user.Username = &username.String
-			}
-			return &user, &tenantInfo, nil
-		}
-
-		if err != sql.ErrNoRows {
-			// Actual error (not just "not found")
-			// Log but continue searching other tenants
-			continue
-		}
-	}
-
-	// User not found in any tenant
-	return nil, nil, errors.InvalidCredentials()
+	return &user, &tenantInfo, nil
 }

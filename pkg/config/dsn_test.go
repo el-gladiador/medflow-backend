@@ -13,13 +13,13 @@ func TestParseDatabaseURL(t *testing.T) {
 	}{
 		{
 			name: "standard postgres URL",
-			url:  "postgres://medflow:devpassword@localhost:5433/medflow_auth?sslmode=disable",
+			url:  "postgres://medflow_app:devpassword@localhost:5432/medflow?sslmode=disable",
 			want: &ParsedDatabaseURL{
 				Host:     "localhost",
-				Port:     5433,
-				User:     "medflow",
+				Port:     5432,
+				User:     "medflow_app",
 				Password: "devpassword",
-				Database: "medflow_auth",
+				Database: "medflow",
 				SSLMode:  "disable",
 				Options:  map[string]string{},
 			},
@@ -55,13 +55,13 @@ func TestParseDatabaseURL(t *testing.T) {
 		},
 		{
 			name: "AWS RDS URL with sslmode require",
-			url:  "postgres://medflow_prod:securepass@medflow.cluster-xxxx.eu-central-1.rds.amazonaws.com:5432/medflow_auth?sslmode=require",
+			url:  "postgres://medflow_prod_app:securepass@medflow.cluster-xxxx.eu-central-1.rds.amazonaws.com:5432/medflow?sslmode=require",
 			want: &ParsedDatabaseURL{
 				Host:     "medflow.cluster-xxxx.eu-central-1.rds.amazonaws.com",
 				Port:     5432,
-				User:     "medflow_prod",
+				User:     "medflow_prod_app",
 				Password: "securepass",
-				Database: "medflow_auth",
+				Database: "medflow",
 				SSLMode:  "require",
 				Options:  map[string]string{},
 			},
@@ -141,22 +141,22 @@ func TestBuildDatabaseURL(t *testing.T) {
 		{
 			name:     "standard local",
 			host:     "localhost",
-			port:     5433,
-			user:     "medflow",
+			port:     5432,
+			user:     "medflow_app",
 			password: "devpassword",
-			database: "medflow_auth",
+			database: "medflow",
 			sslMode:  "disable",
-			want:     "postgres://medflow:devpassword@localhost:5433/medflow_auth?sslmode=disable",
+			want:     "postgres://medflow_app:devpassword@localhost:5432/medflow?sslmode=disable",
 		},
 		{
 			name:     "AWS RDS",
 			host:     "db.eu-central-1.rds.amazonaws.com",
 			port:     5432,
-			user:     "medflow_prod",
+			user:     "medflow_prod_app",
 			password: "securepass",
-			database: "medflow_auth",
+			database: "medflow",
 			sslMode:  "require",
-			want:     "postgres://medflow_prod:securepass@db.eu-central-1.rds.amazonaws.com:5432/medflow_auth?sslmode=require",
+			want:     "postgres://medflow_prod_app:securepass@db.eu-central-1.rds.amazonaws.com:5432/medflow?sslmode=require",
 		},
 		{
 			name:     "password with special chars",
@@ -183,16 +183,16 @@ func TestBuildDatabaseURL(t *testing.T) {
 func TestParsedDatabaseURL_ToDSN(t *testing.T) {
 	parsed := &ParsedDatabaseURL{
 		Host:     "localhost",
-		Port:     5433,
-		User:     "medflow",
+		Port:     5432,
+		User:     "medflow_app",
 		Password: "devpassword",
-		Database: "medflow_auth",
+		Database: "medflow",
 		SSLMode:  "disable",
 		Options:  map[string]string{},
 	}
 
 	dsn := parsed.ToDSN()
-	expected := "host=localhost port=5433 user=medflow password=devpassword dbname=medflow_auth sslmode=disable"
+	expected := "host=localhost port=5432 user=medflow_app password=devpassword dbname=medflow sslmode=disable"
 
 	if dsn != expected {
 		t.Errorf("ToDSN() = %v, want %v", dsn, expected)
@@ -201,7 +201,7 @@ func TestParsedDatabaseURL_ToDSN(t *testing.T) {
 
 func TestRoundTrip(t *testing.T) {
 	// Test that parsing a URL and converting back gives the same result
-	original := "postgres://medflow:devpassword@localhost:5433/medflow_auth?sslmode=disable"
+	original := "postgres://medflow_app:devpassword@localhost:5432/medflow?sslmode=disable"
 
 	parsed, err := ParseDatabaseURL(original)
 	if err != nil {

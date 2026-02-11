@@ -79,9 +79,9 @@ func NewLocationRepository(db *database.DB) *LocationRepository {
 
 // Room operations
 
-// TENANT-ISOLATED: Inserts into the tenant's schema
+// TENANT-ISOLATED: Inserts with tenant_id for RLS
 func (r *LocationRepository) CreateRoom(ctx context.Context, room *StorageRoom) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -90,27 +90,27 @@ func (r *LocationRepository) CreateRoom(ctx context.Context, room *StorageRoom) 
 		room.ID = uuid.New().String()
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-			INSERT INTO storage_rooms (id, name, description, floor, building, is_active)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			INSERT INTO storage_rooms (id, tenant_id, name, description, floor, building, is_active)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			RETURNING created_at, updated_at
 		`
 		return r.db.QueryRowxContext(ctx, query,
-			room.ID, room.Name, room.Description, room.Floor, room.Building, room.IsActive,
+			room.ID, tenantID, room.Name, room.Description, room.Floor, room.Building, room.IsActive,
 		).Scan(&room.CreatedAt, &room.UpdatedAt)
 	})
 }
 
-// TENANT-ISOLATED: Queries only the tenant's schema
+// TENANT-ISOLATED: Queries via RLS
 func (r *LocationRepository) GetRoom(ctx context.Context, id string) (*StorageRoom, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var room StorageRoom
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, name, description, floor, building, is_active, created_at, updated_at
 			FROM storage_rooms WHERE id = $1 AND deleted_at IS NULL
@@ -127,15 +127,15 @@ func (r *LocationRepository) GetRoom(ctx context.Context, id string) (*StorageRo
 	return &room, nil
 }
 
-// TENANT-ISOLATED: Returns only rooms from the tenant's schema
+// TENANT-ISOLATED: Returns only rooms via RLS
 func (r *LocationRepository) ListRooms(ctx context.Context) ([]*StorageRoom, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var rooms []*StorageRoom
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, name, description, floor, building, is_active, created_at, updated_at
 			FROM storage_rooms WHERE is_active = true AND deleted_at IS NULL ORDER BY name
@@ -149,14 +149,14 @@ func (r *LocationRepository) ListRooms(ctx context.Context) ([]*StorageRoom, err
 	return rooms, nil
 }
 
-// TENANT-ISOLATED: Updates only in the tenant's schema
+// TENANT-ISOLATED: Updates via RLS
 func (r *LocationRepository) UpdateRoom(ctx context.Context, room *StorageRoom) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE storage_rooms SET name = $2, description = $3, floor = $4, building = $5, is_active = $6, updated_at = NOW()
 			WHERE id = $1 AND deleted_at IS NULL
@@ -175,14 +175,14 @@ func (r *LocationRepository) UpdateRoom(ctx context.Context, room *StorageRoom) 
 	})
 }
 
-// TENANT-ISOLATED: Deletes only from the tenant's schema
+// TENANT-ISOLATED: Deletes via RLS
 func (r *LocationRepository) DeleteRoom(ctx context.Context, id string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `DELETE FROM storage_rooms WHERE id = $1`
 		result, err := r.db.ExecContext(ctx, query, id)
 		if err != nil {
@@ -198,9 +198,9 @@ func (r *LocationRepository) DeleteRoom(ctx context.Context, id string) error {
 
 // Cabinet operations
 
-// TENANT-ISOLATED: Inserts into the tenant's schema
+// TENANT-ISOLATED: Inserts with tenant_id for RLS
 func (r *LocationRepository) CreateCabinet(ctx context.Context, cabinet *StorageCabinet) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -209,29 +209,29 @@ func (r *LocationRepository) CreateCabinet(ctx context.Context, cabinet *Storage
 		cabinet.ID = uuid.New().String()
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-			INSERT INTO storage_cabinets (id, room_id, name, description, temperature_controlled,
+			INSERT INTO storage_cabinets (id, tenant_id, room_id, name, description, temperature_controlled,
 			       target_temperature_celsius, requires_key, is_active)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			RETURNING created_at, updated_at
 		`
 		return r.db.QueryRowxContext(ctx, query,
-			cabinet.ID, cabinet.RoomID, cabinet.Name, cabinet.Description,
+			cabinet.ID, tenantID, cabinet.RoomID, cabinet.Name, cabinet.Description,
 			cabinet.TemperatureControlled, cabinet.TargetTemperature, cabinet.RequiresKey, cabinet.IsActive,
 		).Scan(&cabinet.CreatedAt, &cabinet.UpdatedAt)
 	})
 }
 
-// TENANT-ISOLATED: Queries only the tenant's schema
+// TENANT-ISOLATED: Queries via RLS
 func (r *LocationRepository) GetCabinet(ctx context.Context, id string) (*StorageCabinet, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var cabinet StorageCabinet
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, room_id, name, description, temperature_controlled,
 			       target_temperature_celsius, requires_key, is_active, created_at, updated_at
@@ -249,15 +249,15 @@ func (r *LocationRepository) GetCabinet(ctx context.Context, id string) (*Storag
 	return &cabinet, nil
 }
 
-// TENANT-ISOLATED: Returns only cabinets from the tenant's schema
+// TENANT-ISOLATED: Returns only cabinets via RLS
 func (r *LocationRepository) ListCabinets(ctx context.Context, roomID string) ([]*StorageCabinet, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var cabinets []*StorageCabinet
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, room_id, name, description, temperature_controlled,
 			       target_temperature_celsius, requires_key, is_active, created_at, updated_at
@@ -272,15 +272,15 @@ func (r *LocationRepository) ListCabinets(ctx context.Context, roomID string) ([
 	return cabinets, nil
 }
 
-// TENANT-ISOLATED: Returns all active cabinets from the tenant's schema
+// TENANT-ISOLATED: Returns all active cabinets via RLS
 func (r *LocationRepository) ListAllCabinets(ctx context.Context) ([]*StorageCabinet, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var cabinets []*StorageCabinet
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, room_id, name, description, temperature_controlled,
 			       target_temperature_celsius, requires_key, is_active, created_at, updated_at
@@ -295,14 +295,14 @@ func (r *LocationRepository) ListAllCabinets(ctx context.Context) ([]*StorageCab
 	return cabinets, nil
 }
 
-// TENANT-ISOLATED: Updates only in the tenant's schema
+// TENANT-ISOLATED: Updates via RLS
 func (r *LocationRepository) UpdateCabinet(ctx context.Context, cabinet *StorageCabinet) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE storage_cabinets SET room_id = $2, name = $3, description = $4, temperature_controlled = $5,
 			target_temperature_celsius = $6, requires_key = $7, is_active = $8, updated_at = NOW()
@@ -323,14 +323,14 @@ func (r *LocationRepository) UpdateCabinet(ctx context.Context, cabinet *Storage
 	})
 }
 
-// TENANT-ISOLATED: Deletes only from the tenant's schema
+// TENANT-ISOLATED: Deletes via RLS
 func (r *LocationRepository) DeleteCabinet(ctx context.Context, id string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `DELETE FROM storage_cabinets WHERE id = $1`
 		result, err := r.db.ExecContext(ctx, query, id)
 		if err != nil {
@@ -346,9 +346,9 @@ func (r *LocationRepository) DeleteCabinet(ctx context.Context, id string) error
 
 // Shelf operations
 
-// TENANT-ISOLATED: Inserts into the tenant's schema
+// TENANT-ISOLATED: Inserts with tenant_id for RLS
 func (r *LocationRepository) CreateShelf(ctx context.Context, shelf *StorageShelf) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -357,27 +357,27 @@ func (r *LocationRepository) CreateShelf(ctx context.Context, shelf *StorageShel
 		shelf.ID = uuid.New().String()
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-			INSERT INTO storage_shelves (id, cabinet_id, name, position)
-			VALUES ($1, $2, $3, $4)
+			INSERT INTO storage_shelves (id, tenant_id, cabinet_id, name, position)
+			VALUES ($1, $2, $3, $4, $5)
 			RETURNING created_at, updated_at
 		`
 		return r.db.QueryRowxContext(ctx, query,
-			shelf.ID, shelf.CabinetID, shelf.Name, shelf.Position,
+			shelf.ID, tenantID, shelf.CabinetID, shelf.Name, shelf.Position,
 		).Scan(&shelf.CreatedAt, &shelf.UpdatedAt)
 	})
 }
 
-// TENANT-ISOLATED: Queries only the tenant's schema
+// TENANT-ISOLATED: Queries via RLS
 func (r *LocationRepository) GetShelf(ctx context.Context, id string) (*StorageShelf, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var shelf StorageShelf
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, cabinet_id, name, position, created_at, updated_at
 			FROM storage_shelves WHERE id = $1 AND deleted_at IS NULL
@@ -394,15 +394,15 @@ func (r *LocationRepository) GetShelf(ctx context.Context, id string) (*StorageS
 	return &shelf, nil
 }
 
-// TENANT-ISOLATED: Returns only shelves from the tenant's schema
+// TENANT-ISOLATED: Returns only shelves via RLS
 func (r *LocationRepository) ListShelves(ctx context.Context, cabinetID string) ([]*StorageShelf, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var shelves []*StorageShelf
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, cabinet_id, name, position, created_at, updated_at
 			FROM storage_shelves WHERE cabinet_id = $1 AND deleted_at IS NULL ORDER BY position
@@ -416,15 +416,15 @@ func (r *LocationRepository) ListShelves(ctx context.Context, cabinetID string) 
 	return shelves, nil
 }
 
-// TENANT-ISOLATED: Returns all active shelves from the tenant's schema
+// TENANT-ISOLATED: Returns all active shelves via RLS
 func (r *LocationRepository) ListAllShelves(ctx context.Context) ([]*StorageShelf, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var shelves []*StorageShelf
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, cabinet_id, name, position, created_at, updated_at
 			FROM storage_shelves WHERE deleted_at IS NULL ORDER BY position
@@ -438,14 +438,14 @@ func (r *LocationRepository) ListAllShelves(ctx context.Context) ([]*StorageShel
 	return shelves, nil
 }
 
-// TENANT-ISOLATED: Updates only in the tenant's schema
+// TENANT-ISOLATED: Updates via RLS
 func (r *LocationRepository) UpdateShelf(ctx context.Context, shelf *StorageShelf) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE storage_shelves SET cabinet_id = $2, name = $3, position = $4, updated_at = NOW()
 			WHERE id = $1 AND deleted_at IS NULL
@@ -464,14 +464,14 @@ func (r *LocationRepository) UpdateShelf(ctx context.Context, shelf *StorageShel
 	})
 }
 
-// TENANT-ISOLATED: Deletes only from the tenant's schema
+// TENANT-ISOLATED: Deletes via RLS
 func (r *LocationRepository) DeleteShelf(ctx context.Context, id string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `DELETE FROM storage_shelves WHERE id = $1`
 		result, err := r.db.ExecContext(ctx, query, id)
 		if err != nil {

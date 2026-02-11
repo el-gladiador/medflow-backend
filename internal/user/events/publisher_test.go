@@ -36,8 +36,7 @@ func TestUserCreatedEvent_IncludesTenantContext(t *testing.T) {
 	// Setup tenant context
 	tenantID := uuid.New().String()
 	tenantSlug := "test-clinic"
-	tenantSchema := "tenant_test_clinic"
-	ctx := tenant.WithTenantContext(context.Background(), tenantID, tenantSlug, tenantSchema)
+	ctx := tenant.WithTenantContext(context.Background(), tenantID, tenantSlug)
 
 	// Create test user
 	user := &domain.User{
@@ -53,7 +52,6 @@ func TestUserCreatedEvent_IncludesTenantContext(t *testing.T) {
 	// Create event data as would be done in PublishUserCreated
 	tenantIDFromCtx, _ := tenant.TenantID(ctx)
 	tenantSlugFromCtx, _ := tenant.TenantSlug(ctx)
-	tenantSchemaFromCtx, _ := tenant.TenantSchema(ctx)
 
 	event := messaging.UserCreatedEvent{
 		UserID:       user.ID,
@@ -63,13 +61,11 @@ func TestUserCreatedEvent_IncludesTenantContext(t *testing.T) {
 		RoleName:     user.Role.Name,
 		TenantID:     tenantIDFromCtx,
 		TenantSlug:   tenantSlugFromCtx,
-		TenantSchema: tenantSchemaFromCtx,
 	}
 
 	// Verify tenant context is included
 	assert.Equal(t, tenantID, event.TenantID)
 	assert.Equal(t, tenantSlug, event.TenantSlug)
-	assert.Equal(t, tenantSchema, event.TenantSchema)
 	assert.Equal(t, user.ID, event.UserID)
 	assert.Equal(t, user.Email, event.Email)
 }
@@ -77,8 +73,7 @@ func TestUserCreatedEvent_IncludesTenantContext(t *testing.T) {
 func TestUserUpdatedEvent_TracksEmailChanges(t *testing.T) {
 	tenantID := uuid.New().String()
 	tenantSlug := "test-clinic"
-	tenantSchema := "tenant_test_clinic"
-	ctx := tenant.WithTenantContext(context.Background(), tenantID, tenantSlug, tenantSchema)
+	ctx := tenant.WithTenantContext(context.Background(), tenantID, tenantSlug)
 
 	userID := uuid.New().String()
 	oldEmail := "old@clinic.de"
@@ -94,7 +89,6 @@ func TestUserUpdatedEvent_TracksEmailChanges(t *testing.T) {
 	// Extract tenant context
 	tenantIDFromCtx, _ := tenant.TenantID(ctx)
 	tenantSlugFromCtx, _ := tenant.TenantSlug(ctx)
-	tenantSchemaFromCtx, _ := tenant.TenantSchema(ctx)
 
 	changes := map[string]interface{}{"email": newEmail}
 
@@ -103,7 +97,6 @@ func TestUserUpdatedEvent_TracksEmailChanges(t *testing.T) {
 		Fields:       changes,
 		TenantID:     tenantIDFromCtx,
 		TenantSlug:   tenantSlugFromCtx,
-		TenantSchema: tenantSchemaFromCtx,
 	}
 
 	// Track email changes
@@ -115,7 +108,6 @@ func TestUserUpdatedEvent_TracksEmailChanges(t *testing.T) {
 	// Verify tenant context
 	assert.Equal(t, tenantID, event.TenantID)
 	assert.Equal(t, tenantSlug, event.TenantSlug)
-	assert.Equal(t, tenantSchema, event.TenantSchema)
 
 	// Verify email tracking
 	require.NotNil(t, event.OldEmail)
@@ -126,7 +118,7 @@ func TestUserUpdatedEvent_TracksEmailChanges(t *testing.T) {
 
 func TestUserUpdatedEvent_NoEmailChange(t *testing.T) {
 	tenantID := uuid.New().String()
-	ctx := tenant.WithTenantContext(context.Background(), tenantID, "test", "tenant_test")
+	ctx := tenant.WithTenantContext(context.Background(), tenantID, "test")
 
 	user := &domain.User{
 		ID:        uuid.New().String(),
@@ -153,28 +145,24 @@ func TestUserUpdatedEvent_NoEmailChange(t *testing.T) {
 func TestUserDeletedEvent_IncludesTenantContext(t *testing.T) {
 	tenantID := uuid.New().String()
 	tenantSlug := "test-clinic"
-	tenantSchema := "tenant_test_clinic"
-	ctx := tenant.WithTenantContext(context.Background(), tenantID, tenantSlug, tenantSchema)
+	ctx := tenant.WithTenantContext(context.Background(), tenantID, tenantSlug)
 
 	userID := uuid.New().String()
 	email := "deleted@clinic.de"
 
 	tenantIDFromCtx, _ := tenant.TenantID(ctx)
 	tenantSlugFromCtx, _ := tenant.TenantSlug(ctx)
-	tenantSchemaFromCtx, _ := tenant.TenantSchema(ctx)
 
 	event := messaging.UserDeletedEvent{
 		UserID:       userID,
 		Email:        email,
 		TenantID:     tenantIDFromCtx,
 		TenantSlug:   tenantSlugFromCtx,
-		TenantSchema: tenantSchemaFromCtx,
 	}
 
 	// Verify tenant context
 	assert.Equal(t, tenantID, event.TenantID)
 	assert.Equal(t, tenantSlug, event.TenantSlug)
-	assert.Equal(t, tenantSchema, event.TenantSchema)
 
 	// Verify email is included for lookup table cleanup
 	assert.Equal(t, email, event.Email)
@@ -192,10 +180,6 @@ func TestUserEventContext_MissingTenantContext(t *testing.T) {
 	tenantSlug, err := tenant.TenantSlug(ctx)
 	assert.Error(t, err)
 	assert.Empty(t, tenantSlug)
-
-	tenantSchema, err := tenant.TenantSchema(ctx)
-	assert.Error(t, err)
-	assert.Empty(t, tenantSchema)
 }
 
 func TestEventJSONSerialization(t *testing.T) {
@@ -207,7 +191,6 @@ func TestEventJSONSerialization(t *testing.T) {
 		RoleName:     "staff",
 		TenantID:     uuid.New().String(),
 		TenantSlug:   "test-clinic",
-		TenantSchema: "tenant_test_clinic",
 	}
 
 	// Serialize to JSON
@@ -227,5 +210,4 @@ func TestEventJSONSerialization(t *testing.T) {
 	assert.Equal(t, event.RoleName, parsed.RoleName)
 	assert.Equal(t, event.TenantID, parsed.TenantID)
 	assert.Equal(t, event.TenantSlug, parsed.TenantSlug)
-	assert.Equal(t, event.TenantSchema, parsed.TenantSchema)
 }

@@ -42,7 +42,6 @@ func TestUserEventHandler_UsernameInEvent(t *testing.T) {
 			RoleName:     "staff",
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		}
 
 		payload, err := json.Marshal(eventData)
@@ -83,7 +82,6 @@ func TestUserEventHandler_UsernameInEvent(t *testing.T) {
 			RoleName:     "staff",
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		}
 
 		payload, err := json.Marshal(eventData)
@@ -125,7 +123,6 @@ func TestUserEventHandler_UsernameInEvent(t *testing.T) {
 			RoleName:     "admin",
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		}
 
 		payload1, _ := json.Marshal(event1Data)
@@ -148,7 +145,6 @@ func TestUserEventHandler_UsernameInEvent(t *testing.T) {
 			RoleName:     "admin",
 			TenantID:     tenant2.ID,
 			TenantSlug:   tenant2.Slug,
-			TenantSchema: tenant2.SchemaName,
 		}
 
 		payload2, _ := json.Marshal(event2Data)

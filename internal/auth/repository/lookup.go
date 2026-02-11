@@ -10,14 +10,13 @@ import (
 
 // UserTenantLookup represents a user-to-tenant mapping for fast login resolution
 type UserTenantLookup struct {
-	Email        string    `db:"email"`
-	Username     *string   `db:"username"` // Optional username for username-based login
-	UserID       string    `db:"user_id"`
-	TenantID     string    `db:"tenant_id"`
-	TenantSlug   string    `db:"tenant_slug"`
-	TenantSchema string    `db:"tenant_schema"`
-	CreatedAt    time.Time `db:"created_at"`
-	UpdatedAt    time.Time `db:"updated_at"`
+	Email     string    `db:"email"`
+	Username  *string   `db:"username"` // Optional username for username-based login
+	UserID    string    `db:"user_id"`
+	TenantID  string    `db:"tenant_id"`
+	TenantSlug string   `db:"tenant_slug"`
+	CreatedAt time.Time `db:"created_at"`
+	UpdatedAt time.Time `db:"updated_at"`
 }
 
 // UserTenantLookupRepository handles user-tenant lookup persistence
@@ -35,7 +34,7 @@ func NewUserTenantLookupRepository(db *database.DB) *UserTenantLookupRepository 
 func (r *UserTenantLookupRepository) GetByEmail(ctx context.Context, email string) (*UserTenantLookup, error) {
 	var lookup UserTenantLookup
 	query := `
-		SELECT email, username, user_id, tenant_id, tenant_slug, tenant_schema, created_at, updated_at
+		SELECT email, username, user_id, tenant_id, tenant_slug, created_at, updated_at
 		FROM public.user_tenant_lookup
 		WHERE email = $1
 	`
@@ -54,7 +53,7 @@ func (r *UserTenantLookupRepository) GetByEmail(ctx context.Context, email strin
 func (r *UserTenantLookupRepository) GetByUsername(ctx context.Context, username string) (*UserTenantLookup, error) {
 	var lookup UserTenantLookup
 	query := `
-		SELECT email, username, user_id, tenant_id, tenant_slug, tenant_schema, created_at, updated_at
+		SELECT email, username, user_id, tenant_id, tenant_slug, created_at, updated_at
 		FROM public.user_tenant_lookup
 		WHERE username = $1
 	`
@@ -73,7 +72,7 @@ func (r *UserTenantLookupRepository) GetByUsername(ctx context.Context, username
 func (r *UserTenantLookupRepository) GetByUsernameAndSlug(ctx context.Context, username, tenantSlug string) (*UserTenantLookup, error) {
 	var lookup UserTenantLookup
 	query := `
-		SELECT email, username, user_id, tenant_id, tenant_slug, tenant_schema, created_at, updated_at
+		SELECT email, username, user_id, tenant_id, tenant_slug, created_at, updated_at
 		FROM public.user_tenant_lookup
 		WHERE username = $1 AND tenant_slug = $2
 	`
@@ -90,7 +89,7 @@ func (r *UserTenantLookupRepository) GetByUsernameAndSlug(ctx context.Context, u
 func (r *UserTenantLookupRepository) GetByUserID(ctx context.Context, userID string) ([]*UserTenantLookup, error) {
 	var lookups []*UserTenantLookup
 	query := `
-		SELECT email, username, user_id, tenant_id, tenant_slug, tenant_schema, created_at, updated_at
+		SELECT email, username, user_id, tenant_id, tenant_slug, created_at, updated_at
 		FROM public.user_tenant_lookup
 		WHERE user_id = $1
 	`
@@ -106,14 +105,13 @@ func (r *UserTenantLookupRepository) GetByUserID(ctx context.Context, userID str
 // Used when a user is created or when their email/username changes
 func (r *UserTenantLookupRepository) Upsert(ctx context.Context, lookup *UserTenantLookup) error {
 	query := `
-		INSERT INTO public.user_tenant_lookup (email, username, user_id, tenant_id, tenant_slug, tenant_schema)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO public.user_tenant_lookup (email, username, user_id, tenant_id, tenant_slug)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (email) DO UPDATE SET
 			username = EXCLUDED.username,
 			user_id = EXCLUDED.user_id,
 			tenant_id = EXCLUDED.tenant_id,
 			tenant_slug = EXCLUDED.tenant_slug,
-			tenant_schema = EXCLUDED.tenant_schema,
 			updated_at = NOW()
 	`
 
@@ -123,7 +121,6 @@ func (r *UserTenantLookupRepository) Upsert(ctx context.Context, lookup *UserTen
 		lookup.UserID,
 		lookup.TenantID,
 		lookup.TenantSlug,
-		lookup.TenantSchema,
 	)
 
 	return err
@@ -153,7 +150,7 @@ func (r *UserTenantLookupRepository) UpdateEmail(ctx context.Context, oldEmail, 
 		// First, get the existing entry's tenant info
 		var lookup UserTenantLookup
 		err := tx.GetContext(ctx, &lookup, `
-			SELECT email, user_id, tenant_id, tenant_slug, tenant_schema, created_at, updated_at
+			SELECT email, user_id, tenant_id, tenant_slug, created_at, updated_at
 			FROM public.user_tenant_lookup
 			WHERE email = $1
 		`, oldEmail)
@@ -169,9 +166,9 @@ func (r *UserTenantLookupRepository) UpdateEmail(ctx context.Context, oldEmail, 
 
 		// Insert new email entry with the same tenant info
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO public.user_tenant_lookup (email, user_id, tenant_id, tenant_slug, tenant_schema)
-			VALUES ($1, $2, $3, $4, $5)
-		`, newEmail, lookup.UserID, lookup.TenantID, lookup.TenantSlug, lookup.TenantSchema)
+			INSERT INTO public.user_tenant_lookup (email, user_id, tenant_id, tenant_slug)
+			VALUES ($1, $2, $3, $4)
+		`, newEmail, lookup.UserID, lookup.TenantID, lookup.TenantSlug)
 		return err
 	})
 }

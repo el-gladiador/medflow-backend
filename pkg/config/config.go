@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +43,9 @@ type DatabaseConfig struct {
 	MaxOpenConns    int           `mapstructure:"max_open_conns"`
 	MaxIdleConns    int           `mapstructure:"max_idle_conns"`
 	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
+	// SearchPath is the PostgreSQL search_path for RLS-based multi-tenancy.
+	// Each service operates in its own schema (e.g., "users, public" for user-service).
+	SearchPath string `mapstructure:"search_path"`
 }
 
 // DSN returns the PostgreSQL connection string.
@@ -186,7 +191,7 @@ func loadConfig(serviceName string, applyDefaults bool) (*Config, error) {
 			if cfg.Database.Port == 0 || cfg.Database.Port == getDefaultDBPort(serviceName) {
 				cfg.Database.Port = parsed.Port
 			}
-			if cfg.Database.User == "medflow" || cfg.Database.User == "" {
+			if cfg.Database.User == "medflow_app" || cfg.Database.User == "" {
 				cfg.Database.User = parsed.User
 			}
 			if cfg.Database.Password == "devpassword" || cfg.Database.Password == "" {
@@ -198,6 +203,14 @@ func loadConfig(serviceName string, applyDefaults bool) (*Config, error) {
 			if cfg.Database.SSLMode == "disable" || cfg.Database.SSLMode == "" {
 				cfg.Database.SSLMode = parsed.SSLMode
 			}
+		}
+	}
+
+	// Cloud Run PORT override: Cloud Run sets PORT env var.
+	// This takes precedence over MEDFLOW_SERVER_PORT when present.
+	if portStr := os.Getenv("PORT"); portStr != "" {
+		if port, err := strconv.Atoi(portStr); err == nil {
+			cfg.Server.Port = port
 		}
 	}
 
@@ -219,13 +232,14 @@ func setDefaults(v *viper.Viper, serviceName string) {
 	v.SetDefault("database.url", "")
 	v.SetDefault("database.host", "localhost")
 	v.SetDefault("database.port", getDefaultDBPort(serviceName))
-	v.SetDefault("database.user", "medflow")
+	v.SetDefault("database.user", "medflow_app")
 	v.SetDefault("database.password", "devpassword")
 	v.SetDefault("database.database", getDefaultDBName(serviceName))
 	v.SetDefault("database.ssl_mode", "disable")
 	v.SetDefault("database.max_open_conns", 25)
 	v.SetDefault("database.max_idle_conns", 5)
 	v.SetDefault("database.conn_max_lifetime", 5*time.Minute)
+	v.SetDefault("database.search_path", getDefaultSearchPath(serviceName))
 
 	// RabbitMQ defaults
 	v.SetDefault("rabbitmq.url", "amqp://medflow:devpassword@localhost:5672/")
@@ -261,27 +275,24 @@ func getDefaultPort(serviceName string) int {
 }
 
 func getDefaultDBPort(serviceName string) int {
-	ports := map[string]int{
-		"auth-service":      5433,
-		"user-service":      5434,
-		"staff-service":     5435,
-		"inventory-service": 5436,
-	}
-	if port, ok := ports[serviceName]; ok {
-		return port
-	}
+	// All services connect to a single PostgreSQL instance
 	return 5432
 }
 
 func getDefaultDBName(serviceName string) string {
-	names := map[string]string{
-		"auth-service":      "medflow_auth",
-		"user-service":      "medflow_users",
-		"staff-service":     "medflow_staff",
-		"inventory-service": "medflow_inventory",
-	}
-	if name, ok := names[serviceName]; ok {
-		return name
-	}
+	// All services share a single database, isolated by schemas + RLS
 	return "medflow"
+}
+
+func getDefaultSearchPath(serviceName string) string {
+	paths := map[string]string{
+		"auth-service":      "public",
+		"user-service":      "users, public",
+		"staff-service":     "staff, public",
+		"inventory-service": "inventory, public",
+	}
+	if path, ok := paths[serviceName]; ok {
+		return path
+	}
+	return "public"
 }

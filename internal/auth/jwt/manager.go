@@ -20,10 +20,9 @@ type Claims struct {
 	Permissions []string `json:"permissions,omitempty"`
 	IsManager   bool     `json:"is_manager"`
 
-	// Tenant context - added for multi-tenancy support
-	TenantID     string `json:"tenant_id"`
-	TenantSlug   string `json:"tenant_slug"`
-	TenantSchema string `json:"tenant_schema"`
+	// Tenant context for RLS-based multi-tenancy
+	TenantID   string `json:"tenant_id"`
+	TenantSlug string `json:"tenant_slug,omitempty"`
 }
 
 // FullName returns the user's full name
@@ -37,10 +36,9 @@ type RefreshClaims struct {
 	UserID    string `json:"user_id"`
 	SessionID string `json:"session_id"`
 
-	// Tenant context - needed for token refresh to call user service
-	TenantID     string `json:"tenant_id"`
-	TenantSlug   string `json:"tenant_slug"`
-	TenantSchema string `json:"tenant_schema"`
+	// Tenant context for RLS-based multi-tenancy
+	TenantID   string `json:"tenant_id"`
+	TenantSlug string `json:"tenant_slug,omitempty"`
 }
 
 // Manager handles JWT operations
@@ -64,9 +62,8 @@ type UserInfo struct {
 	IsManager   bool
 
 	// Tenant context - populated during login
-	TenantID     string
-	TenantSlug   string
-	TenantSchema string
+	TenantID   string
+	TenantSlug string
 }
 
 // FullName returns the user's full name
@@ -107,9 +104,8 @@ func (m *Manager) GenerateTokenPair(user *UserInfo, sessionID string) (*TokenPai
 		IsManager:   user.IsManager,
 
 		// Include tenant context in JWT
-		TenantID:     user.TenantID,
-		TenantSlug:   user.TenantSlug,
-		TenantSchema: user.TenantSchema,
+		TenantID:   user.TenantID,
+		TenantSlug: user.TenantSlug,
 	}
 
 	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
@@ -131,9 +127,8 @@ func (m *Manager) GenerateTokenPair(user *UserInfo, sessionID string) (*TokenPai
 		SessionID: sessionID,
 
 		// Include tenant context for refresh flow
-		TenantID:     user.TenantID,
-		TenantSlug:   user.TenantSlug,
-		TenantSchema: user.TenantSchema,
+		TenantID:   user.TenantID,
+		TenantSlug: user.TenantSlug,
 	}
 
 	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)

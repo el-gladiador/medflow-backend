@@ -115,7 +115,7 @@ func NewTimeTrackingRepository(db *database.DB) *TimeTrackingRepository {
 // CreateEntry creates a new time entry
 // TENANT-ISOLATED: Inserts into the tenant's schema
 func (r *TimeTrackingRepository) CreateEntry(ctx context.Context, entry *TimeEntry) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -124,16 +124,16 @@ func (r *TimeTrackingRepository) CreateEntry(ctx context.Context, entry *TimeEnt
 		entry.ID = uuid.New().String()
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			INSERT INTO time_entries (
-				id, employee_id, entry_date, clock_in, clock_out,
+				id, tenant_id, employee_id, entry_date, clock_in, clock_out,
 				total_work_minutes, total_break_minutes, notes, is_manual_entry, created_by
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			RETURNING created_at, updated_at
 		`
 		return r.db.QueryRowxContext(ctx, query,
-			entry.ID, entry.EmployeeID, entry.EntryDate, entry.ClockIn, entry.ClockOut,
+			entry.ID, tenantID, entry.EmployeeID, entry.EntryDate, entry.ClockIn, entry.ClockOut,
 			entry.TotalWorkMinutes, entry.TotalBreakMinutes, entry.Notes, entry.IsManualEntry, entry.CreatedBy,
 		).Scan(&entry.CreatedAt, &entry.UpdatedAt)
 	})
@@ -142,14 +142,14 @@ func (r *TimeTrackingRepository) CreateEntry(ctx context.Context, entry *TimeEnt
 // GetEntryByID gets a time entry by ID
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *TimeTrackingRepository) GetEntryByID(ctx context.Context, id string) (*TimeEntry, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var entry TimeEntry
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT te.id, te.employee_id, te.entry_date, te.clock_in, te.clock_out,
 			       te.total_work_minutes, te.total_break_minutes, te.notes, te.is_manual_entry,
@@ -175,14 +175,14 @@ func (r *TimeTrackingRepository) GetEntryByID(ctx context.Context, id string) (*
 // GetActiveEntryByEmployeeID gets the active (not clocked out) time entry for an employee
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *TimeTrackingRepository) GetActiveEntryByEmployeeID(ctx context.Context, employeeID string) (*TimeEntry, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var entry TimeEntry
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, employee_id, entry_date, clock_in, clock_out,
 			       total_work_minutes, total_break_minutes, notes, is_manual_entry,
@@ -208,14 +208,14 @@ func (r *TimeTrackingRepository) GetActiveEntryByEmployeeID(ctx context.Context,
 // GetEntryByEmployeeAndDate gets a time entry for an employee on a specific date
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *TimeTrackingRepository) GetEntryByEmployeeAndDate(ctx context.Context, employeeID string, date time.Time) (*TimeEntry, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var entry TimeEntry
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, employee_id, entry_date, clock_in, clock_out,
 			       total_work_minutes, total_break_minutes, notes, is_manual_entry,
@@ -241,12 +241,12 @@ func (r *TimeTrackingRepository) GetEntryByEmployeeAndDate(ctx context.Context, 
 // UpdateEntry updates a time entry
 // TENANT-ISOLATED: Updates only in the tenant's schema
 func (r *TimeTrackingRepository) UpdateEntry(ctx context.Context, entry *TimeEntry) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE time_entries SET
 				clock_in = $2, clock_out = $3, total_work_minutes = $4, total_break_minutes = $5,
@@ -273,12 +273,12 @@ func (r *TimeTrackingRepository) UpdateEntry(ctx context.Context, entry *TimeEnt
 // SoftDeleteEntry soft deletes a time entry
 // TENANT-ISOLATED: Soft deletes only in the tenant's schema
 func (r *TimeTrackingRepository) SoftDeleteEntry(ctx context.Context, id string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `UPDATE time_entries SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
 		result, err := r.db.ExecContext(ctx, query, id)
 		if err != nil {
@@ -297,14 +297,14 @@ func (r *TimeTrackingRepository) SoftDeleteEntry(ctx context.Context, id string)
 // ListEntriesByDate gets all time entries for a specific date
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *TimeTrackingRepository) ListEntriesByDate(ctx context.Context, date time.Time) ([]*TimeEntry, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var entries []*TimeEntry
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT te.id, te.employee_id, te.entry_date, te.clock_in, te.clock_out,
 			       te.total_work_minutes, te.total_break_minutes, te.notes, te.is_manual_entry,
@@ -328,14 +328,14 @@ func (r *TimeTrackingRepository) ListEntriesByDate(ctx context.Context, date tim
 // ListEntriesForEmployee gets time entries for an employee within a date range
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *TimeTrackingRepository) ListEntriesForEmployee(ctx context.Context, employeeID string, startDate, endDate time.Time) ([]*TimeEntry, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var entries []*TimeEntry
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, employee_id, entry_date, clock_in, clock_out,
 			       total_work_minutes, total_break_minutes, notes, is_manual_entry,
@@ -361,7 +361,7 @@ func (r *TimeTrackingRepository) ListEntriesForEmployee(ctx context.Context, emp
 // CreateBreak creates a new time break
 // TENANT-ISOLATED: Inserts into the tenant's schema
 func (r *TimeTrackingRepository) CreateBreak(ctx context.Context, brk *TimeBreak) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -370,14 +370,14 @@ func (r *TimeTrackingRepository) CreateBreak(ctx context.Context, brk *TimeBreak
 		brk.ID = uuid.New().String()
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-			INSERT INTO time_breaks (id, time_entry_id, start_time, end_time)
-			VALUES ($1, $2, $3, $4)
+			INSERT INTO time_breaks (id, tenant_id, time_entry_id, start_time, end_time)
+			VALUES ($1, $2, $3, $4, $5)
 			RETURNING created_at, updated_at
 		`
 		return r.db.QueryRowxContext(ctx, query,
-			brk.ID, brk.TimeEntryID, brk.StartTime, brk.EndTime,
+			brk.ID, tenantID, brk.TimeEntryID, brk.StartTime, brk.EndTime,
 		).Scan(&brk.CreatedAt, &brk.UpdatedAt)
 	})
 }
@@ -385,14 +385,14 @@ func (r *TimeTrackingRepository) CreateBreak(ctx context.Context, brk *TimeBreak
 // GetActiveBreak gets the active (not ended) break for a time entry
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *TimeTrackingRepository) GetActiveBreak(ctx context.Context, timeEntryID string) (*TimeBreak, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var brk TimeBreak
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, time_entry_id, start_time, end_time, created_at, updated_at
 			FROM time_breaks
@@ -416,12 +416,12 @@ func (r *TimeTrackingRepository) GetActiveBreak(ctx context.Context, timeEntryID
 // UpdateBreak updates a time break
 // TENANT-ISOLATED: Updates only in the tenant's schema
 func (r *TimeTrackingRepository) UpdateBreak(ctx context.Context, brk *TimeBreak) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE time_breaks SET end_time = $2
 			WHERE id = $1
@@ -443,14 +443,14 @@ func (r *TimeTrackingRepository) UpdateBreak(ctx context.Context, brk *TimeBreak
 // ListBreaksForEntry gets all breaks for a time entry
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *TimeTrackingRepository) ListBreaksForEntry(ctx context.Context, timeEntryID string) ([]*TimeBreak, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var breaks []*TimeBreak
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, time_entry_id, start_time, end_time, created_at, updated_at
 			FROM time_breaks
@@ -470,12 +470,12 @@ func (r *TimeTrackingRepository) ListBreaksForEntry(ctx context.Context, timeEnt
 // DeleteBreaksForEntry deletes all breaks for a time entry
 // TENANT-ISOLATED: Deletes only in the tenant's schema
 func (r *TimeTrackingRepository) DeleteBreaksForEntry(ctx context.Context, timeEntryID string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `DELETE FROM time_breaks WHERE time_entry_id = $1`
 		_, err := r.db.ExecContext(ctx, query, timeEntryID)
 		return err
@@ -485,12 +485,12 @@ func (r *TimeTrackingRepository) DeleteBreaksForEntry(ctx context.Context, timeE
 // DeleteBreak deletes a single break
 // TENANT-ISOLATED: Deletes only in the tenant's schema
 func (r *TimeTrackingRepository) DeleteBreak(ctx context.Context, breakID string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `DELETE FROM time_breaks WHERE id = $1`
 		result, err := r.db.ExecContext(ctx, query, breakID)
 		if err != nil {
@@ -509,14 +509,14 @@ func (r *TimeTrackingRepository) DeleteBreak(ctx context.Context, breakID string
 // CalculateTotalBreakMinutes calculates total break minutes for a time entry
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *TimeTrackingRepository) CalculateTotalBreakMinutes(ctx context.Context, timeEntryID string) (int, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return 0, err
 	}
 
 	var totalMinutes int
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT COALESCE(SUM(
 				EXTRACT(EPOCH FROM (COALESCE(end_time, NOW()) - start_time)) / 60
@@ -541,7 +541,7 @@ func (r *TimeTrackingRepository) CalculateTotalBreakMinutes(ctx context.Context,
 // CreateCorrection creates a new time correction
 // TENANT-ISOLATED: Inserts into the tenant's schema
 func (r *TimeTrackingRepository) CreateCorrection(ctx context.Context, corr *TimeCorrection) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -550,17 +550,17 @@ func (r *TimeTrackingRepository) CreateCorrection(ctx context.Context, corr *Tim
 		corr.ID = uuid.New().String()
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			INSERT INTO time_corrections (
-				id, employee_id, time_entry_id, correction_date,
+				id, tenant_id, employee_id, time_entry_id, correction_date,
 				original_clock_in, original_clock_out, corrected_clock_in, corrected_clock_out,
 				reason, corrected_by
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			RETURNING created_at, updated_at
 		`
 		return r.db.QueryRowxContext(ctx, query,
-			corr.ID, corr.EmployeeID, corr.TimeEntryID, corr.CorrectionDate,
+			corr.ID, tenantID, corr.EmployeeID, corr.TimeEntryID, corr.CorrectionDate,
 			corr.OriginalClockIn, corr.OriginalClockOut, corr.CorrectedClockIn, corr.CorrectedClockOut,
 			corr.Reason, corr.CorrectedBy,
 		).Scan(&corr.CreatedAt, &corr.UpdatedAt)
@@ -570,14 +570,14 @@ func (r *TimeTrackingRepository) CreateCorrection(ctx context.Context, corr *Tim
 // ListCorrectionsForEmployee gets corrections for an employee within a date range
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *TimeTrackingRepository) ListCorrectionsForEmployee(ctx context.Context, employeeID string, startDate, endDate time.Time) ([]*TimeCorrection, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var corrections []*TimeCorrection
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT tc.id, tc.employee_id, tc.time_entry_id, tc.correction_date,
 			       tc.original_clock_in, tc.original_clock_out, tc.corrected_clock_in, tc.corrected_clock_out,
@@ -605,14 +605,14 @@ func (r *TimeTrackingRepository) ListCorrectionsForEmployee(ctx context.Context,
 // GetAllEmployeeStatuses gets the time tracking status for all employees
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *TimeTrackingRepository) GetAllEmployeeStatuses(ctx context.Context) ([]*EmployeeTimeStatus, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var statuses []*EmployeeTimeStatus
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// Get all active employees with today's latest time entry (active or completed)
 		query := `
 			SELECT
@@ -720,7 +720,7 @@ func (r *TimeTrackingRepository) GetAllEmployeeStatuses(ctx context.Context) ([]
 // GetEmployeeTimeSummary gets a time summary for an employee within a date range
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *TimeTrackingRepository) GetEmployeeTimeSummary(ctx context.Context, employeeID string, startDate, endDate time.Time) (*TimePeriodSummary, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -731,7 +731,7 @@ func (r *TimeTrackingRepository) GetEmployeeTimeSummary(ctx context.Context, emp
 		EndDate:    endDate,
 	}
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// Get employee name
 		var empName string
 		nameQuery := `SELECT CONCAT(first_name, ' ', last_name) FROM employees WHERE id = $1`
@@ -774,14 +774,14 @@ func (r *TimeTrackingRepository) GetEmployeeTimeSummary(ctx context.Context, emp
 // GetTotalWorkMinutesForWeek gets total work minutes for an employee in the current week
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *TimeTrackingRepository) GetTotalWorkMinutesForWeek(ctx context.Context, employeeID string) (int, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return 0, err
 	}
 
 	var totalMinutes int
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT COALESCE(SUM(total_work_minutes), 0)
 			FROM time_entries
@@ -803,14 +803,14 @@ func (r *TimeTrackingRepository) GetTotalWorkMinutesForWeek(ctx context.Context,
 // CheckEmployeeExists verifies an employee exists
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *TimeTrackingRepository) CheckEmployeeExists(ctx context.Context, employeeID string) (bool, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return false, err
 	}
 
 	var exists bool
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `SELECT EXISTS(SELECT 1 FROM employees WHERE id = $1 AND deleted_at IS NULL)`
 		return r.db.GetContext(ctx, &exists, query, employeeID)
 	})

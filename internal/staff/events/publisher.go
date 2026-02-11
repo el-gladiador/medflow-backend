@@ -29,6 +29,7 @@ func NewStaffEventPublisher(rmq *messaging.RabbitMQ, log *logger.Logger) (*Staff
 
 // PublishEmployeeCreated publishes an employee created event
 func (p *StaffEventPublisher) PublishEmployeeCreated(ctx context.Context, emp *repository.Employee) {
+	if p == nil { return }
 	data := messaging.EmployeeCreatedEvent{
 		EmployeeID: emp.ID,
 		UserID:     emp.UserID,
@@ -42,6 +43,7 @@ func (p *StaffEventPublisher) PublishEmployeeCreated(ctx context.Context, emp *r
 
 // PublishEmployeeUpdated publishes an employee updated event
 func (p *StaffEventPublisher) PublishEmployeeUpdated(ctx context.Context, emp *repository.Employee) {
+	if p == nil { return }
 	data := messaging.EmployeeUpdatedEvent{
 		EmployeeID: emp.ID,
 		Fields:     map[string]any{"name": emp.FirstName + " " + emp.LastName},
@@ -54,6 +56,7 @@ func (p *StaffEventPublisher) PublishEmployeeUpdated(ctx context.Context, emp *r
 
 // PublishEmployeeDeleted publishes an employee deleted event
 func (p *StaffEventPublisher) PublishEmployeeDeleted(ctx context.Context, employeeID string) {
+	if p == nil { return }
 	data := messaging.EmployeeDeletedEvent{
 		EmployeeID: employeeID,
 	}
@@ -64,16 +67,16 @@ func (p *StaffEventPublisher) PublishEmployeeDeleted(ctx context.Context, employ
 }
 
 // PublishEmployeeCredentialsAdded publishes an event when credentials are added to an employee
-func (p *StaffEventPublisher) PublishEmployeeCredentialsAdded(ctx context.Context, employeeID, userID, email, roleName, addedBy, tenantID, tenantSlug, tenantSchema string) {
+func (p *StaffEventPublisher) PublishEmployeeCredentialsAdded(ctx context.Context, employeeID, userID, email, roleName, addedBy, tenantID, tenantSlug string) {
+	if p == nil { return }
 	data := messaging.EmployeeCredentialsAddedEvent{
-		EmployeeID:   employeeID,
-		UserID:       userID,
-		Email:        email,
-		RoleName:     roleName,
-		AddedBy:      addedBy,
-		TenantID:     tenantID,
-		TenantSlug:   tenantSlug,
-		TenantSchema: tenantSchema,
+		EmployeeID: employeeID,
+		UserID:     userID,
+		Email:      email,
+		RoleName:   roleName,
+		AddedBy:    addedBy,
+		TenantID:   tenantID,
+		TenantSlug: tenantSlug,
 	}
 
 	if err := p.publisher.Publish(ctx, messaging.EventEmployeeCredentialsAdded, data); err != nil {
@@ -85,16 +88,16 @@ func (p *StaffEventPublisher) PublishEmployeeCredentialsAdded(ctx context.Contex
 }
 
 // PublishEmployeeCredentialsRemoved publishes an event when credentials are removed from an employee
-func (p *StaffEventPublisher) PublishEmployeeCredentialsRemoved(ctx context.Context, employeeID, userID, email, removedBy, reason, tenantID, tenantSlug, tenantSchema string) {
+func (p *StaffEventPublisher) PublishEmployeeCredentialsRemoved(ctx context.Context, employeeID, userID, email, removedBy, reason, tenantID, tenantSlug string) {
+	if p == nil { return }
 	data := messaging.EmployeeCredentialsRemovedEvent{
-		EmployeeID:   employeeID,
-		UserID:       userID,
-		Email:        email,
-		RemovedBy:    removedBy,
-		Reason:       reason,
-		TenantID:     tenantID,
-		TenantSlug:   tenantSlug,
-		TenantSchema: tenantSchema,
+		EmployeeID: employeeID,
+		UserID:     userID,
+		Email:      email,
+		RemovedBy:  removedBy,
+		Reason:     reason,
+		TenantID:   tenantID,
+		TenantSlug: tenantSlug,
 	}
 
 	if err := p.publisher.Publish(ctx, messaging.EventEmployeeCredentialsRemoved, data); err != nil {
@@ -111,6 +114,7 @@ func (p *StaffEventPublisher) PublishEmployeeCredentialsRemoved(ctx context.Cont
 
 // PublishShiftCreated publishes a shift created event
 func (p *StaffEventPublisher) PublishShiftCreated(ctx context.Context, shift *repository.ShiftAssignment) {
+	if p == nil { return }
 	data := messaging.ShiftCreatedEvent{
 		ShiftID:    shift.ID,
 		EmployeeID: shift.EmployeeID,
@@ -127,6 +131,7 @@ func (p *StaffEventPublisher) PublishShiftCreated(ctx context.Context, shift *re
 
 // PublishShiftUpdated publishes a shift updated event
 func (p *StaffEventPublisher) PublishShiftUpdated(ctx context.Context, shift *repository.ShiftAssignment) {
+	if p == nil { return }
 	data := messaging.ShiftUpdatedEvent{
 		ShiftID:    shift.ID,
 		EmployeeID: shift.EmployeeID,
@@ -145,6 +150,7 @@ func (p *StaffEventPublisher) PublishShiftUpdated(ctx context.Context, shift *re
 
 // PublishShiftDeleted publishes a shift deleted event
 func (p *StaffEventPublisher) PublishShiftDeleted(ctx context.Context, shift *repository.ShiftAssignment) {
+	if p == nil { return }
 	data := messaging.ShiftDeletedEvent{
 		ShiftID:    shift.ID,
 		EmployeeID: shift.EmployeeID,
@@ -161,6 +167,7 @@ func (p *StaffEventPublisher) PublishShiftDeleted(ctx context.Context, shift *re
 
 // PublishAbsenceCreated publishes an absence created event
 func (p *StaffEventPublisher) PublishAbsenceCreated(ctx context.Context, absence *repository.Absence) {
+	if p == nil { return }
 	data := messaging.AbsenceCreatedEvent{
 		AbsenceID:   absence.ID,
 		EmployeeID:  absence.EmployeeID,
@@ -177,6 +184,7 @@ func (p *StaffEventPublisher) PublishAbsenceCreated(ctx context.Context, absence
 
 // PublishAbsenceUpdated publishes an absence updated event
 func (p *StaffEventPublisher) PublishAbsenceUpdated(ctx context.Context, absence *repository.Absence) {
+	if p == nil { return }
 	data := messaging.AbsenceUpdatedEvent{
 		AbsenceID:  absence.ID,
 		EmployeeID: absence.EmployeeID,
@@ -195,6 +203,7 @@ func (p *StaffEventPublisher) PublishAbsenceUpdated(ctx context.Context, absence
 
 // PublishAbsenceApproved publishes an absence approved event
 func (p *StaffEventPublisher) PublishAbsenceApproved(ctx context.Context, absenceID, reviewerID string) {
+	if p == nil { return }
 	data := messaging.AbsenceApprovedEvent{
 		AbsenceID:  absenceID,
 		ReviewerID: reviewerID,
@@ -207,6 +216,7 @@ func (p *StaffEventPublisher) PublishAbsenceApproved(ctx context.Context, absenc
 
 // PublishAbsenceRejected publishes an absence rejected event
 func (p *StaffEventPublisher) PublishAbsenceRejected(ctx context.Context, absenceID, reviewerID, reason string) {
+	if p == nil { return }
 	data := messaging.AbsenceRejectedEvent{
 		AbsenceID:  absenceID,
 		ReviewerID: reviewerID,
@@ -220,6 +230,7 @@ func (p *StaffEventPublisher) PublishAbsenceRejected(ctx context.Context, absenc
 
 // PublishAbsenceDeleted publishes an absence deleted event
 func (p *StaffEventPublisher) PublishAbsenceDeleted(ctx context.Context, absenceID string) {
+	if p == nil { return }
 	data := messaging.AbsenceDeletedEvent{
 		AbsenceID: absenceID,
 	}
@@ -235,6 +246,7 @@ func (p *StaffEventPublisher) PublishAbsenceDeleted(ctx context.Context, absence
 
 // PublishTimeClockIn publishes a time clock in event
 func (p *StaffEventPublisher) PublishTimeClockIn(ctx context.Context, entry *repository.TimeEntry) {
+	if p == nil { return }
 	data := messaging.TimeClockInEvent{
 		TimeEntryID: entry.ID,
 		EmployeeID:  entry.EmployeeID,
@@ -249,6 +261,7 @@ func (p *StaffEventPublisher) PublishTimeClockIn(ctx context.Context, entry *rep
 
 // PublishTimeClockOut publishes a time clock out event
 func (p *StaffEventPublisher) PublishTimeClockOut(ctx context.Context, entry *repository.TimeEntry) {
+	if p == nil { return }
 	if entry.ClockOut == nil {
 		p.logger.Warn().Str("time_entry_id", entry.ID).Msg("attempted to publish clock out event with nil clock_out")
 		return
@@ -271,6 +284,7 @@ func (p *StaffEventPublisher) PublishTimeClockOut(ctx context.Context, entry *re
 
 // PublishTimeBreakStart publishes a time break start event
 func (p *StaffEventPublisher) PublishTimeBreakStart(ctx context.Context, brk *repository.TimeBreak, employeeID string) {
+	if p == nil { return }
 	data := messaging.TimeBreakStartEvent{
 		TimeBreakID: brk.ID,
 		TimeEntryID: brk.TimeEntryID,
@@ -285,6 +299,7 @@ func (p *StaffEventPublisher) PublishTimeBreakStart(ctx context.Context, brk *re
 
 // PublishTimeBreakEnd publishes a time break end event
 func (p *StaffEventPublisher) PublishTimeBreakEnd(ctx context.Context, brk *repository.TimeBreak, employeeID string) {
+	if p == nil { return }
 	if brk.EndTime == nil {
 		p.logger.Warn().Str("time_break_id", brk.ID).Msg("attempted to publish break end event with nil end_time")
 		return

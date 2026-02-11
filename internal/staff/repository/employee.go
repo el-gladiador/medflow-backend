@@ -145,7 +145,7 @@ func NewEmployeeRepository(db *database.DB) *EmployeeRepository {
 // TENANT-ISOLATED: Inserts into the tenant's schema
 func (r *EmployeeRepository) Create(ctx context.Context, emp *Employee) error {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
@@ -163,21 +163,21 @@ func (r *EmployeeRepository) Create(ctx context.Context, emp *Employee) error {
 	}
 
 	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			INSERT INTO employees (
-				id, user_id, employee_number, first_name, last_name, avatar_url,
+				id, tenant_id, user_id, employee_number, first_name, last_name, avatar_url,
 				date_of_birth, gender, nationality,
 				job_title, department, employment_type, hire_date,
 				probation_end_date, termination_date, status, notes,
 				email, phone, mobile, created_by
 			) VALUES (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
 			) RETURNING created_at, updated_at
 		`
 
 		return r.db.QueryRowxContext(ctx, query,
-			emp.ID, emp.UserID, emp.EmployeeNumber, emp.FirstName, emp.LastName, emp.AvatarURL,
+			emp.ID, tenantID, emp.UserID, emp.EmployeeNumber, emp.FirstName, emp.LastName, emp.AvatarURL,
 			emp.DateOfBirth, emp.Gender, emp.Nationality,
 			emp.JobTitle, emp.Department, emp.EmploymentType, emp.HireDate,
 			emp.ProbationEnd, emp.TerminationDate, emp.Status, emp.Notes,
@@ -190,7 +190,7 @@ func (r *EmployeeRepository) Create(ctx context.Context, emp *Employee) error {
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *EmployeeRepository) GetByID(ctx context.Context, id string) (*Employee, error) {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err // Fail-fast if tenant context missing
 	}
@@ -198,7 +198,7 @@ func (r *EmployeeRepository) GetByID(ctx context.Context, id string) (*Employee,
 	var emp Employee
 
 	// Execute query with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, user_id, employee_number, first_name, last_name, avatar_url,
 			       date_of_birth, gender, nationality,
@@ -227,7 +227,7 @@ func (r *EmployeeRepository) GetByID(ctx context.Context, id string) (*Employee,
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *EmployeeRepository) GetByUserID(ctx context.Context, userID string) (*Employee, error) {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err // Fail-fast if tenant context missing
 	}
@@ -235,7 +235,7 @@ func (r *EmployeeRepository) GetByUserID(ctx context.Context, userID string) (*E
 	var emp Employee
 
 	// Execute query with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, user_id, employee_number, first_name, last_name, avatar_url,
 			       date_of_birth, gender, nationality,
@@ -264,7 +264,7 @@ func (r *EmployeeRepository) GetByUserID(ctx context.Context, userID string) (*E
 // TENANT-ISOLATED: Returns only employees from the tenant's schema
 func (r *EmployeeRepository) List(ctx context.Context, page, perPage int) ([]*Employee, int64, error) {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, 0, err // Fail-fast if tenant context missing
 	}
@@ -273,7 +273,7 @@ func (r *EmployeeRepository) List(ctx context.Context, page, perPage int) ([]*Em
 	var employees []*Employee
 
 	// Execute queries with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// Count total employees
 		countQuery := `SELECT COUNT(*) FROM employees WHERE deleted_at IS NULL`
 		if err := r.db.GetContext(ctx, &total, countQuery); err != nil {
@@ -309,13 +309,13 @@ func (r *EmployeeRepository) List(ctx context.Context, page, perPage int) ([]*Em
 // TENANT-ISOLATED: Updates only in the tenant's schema
 func (r *EmployeeRepository) Update(ctx context.Context, emp *Employee) error {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
 
 	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE employees SET
 				user_id = $2, employee_number = $3, first_name = $4, last_name = $5, avatar_url = $6,
@@ -351,13 +351,13 @@ func (r *EmployeeRepository) Update(ctx context.Context, emp *Employee) error {
 // TENANT-ISOLATED: Soft deletes only in the tenant's schema
 func (r *EmployeeRepository) SoftDelete(ctx context.Context, id string) error {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
 
 	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `UPDATE employees SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
 		result, err := r.db.ExecContext(ctx, query, id)
 		if err != nil {
@@ -377,7 +377,7 @@ func (r *EmployeeRepository) SoftDelete(ctx context.Context, id string) error {
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *EmployeeRepository) GetAddress(ctx context.Context, employeeID string) (*EmployeeAddress, error) {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err // Fail-fast if tenant context missing
 	}
@@ -385,7 +385,7 @@ func (r *EmployeeRepository) GetAddress(ctx context.Context, employeeID string) 
 	var addr EmployeeAddress
 
 	// Execute query with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, employee_id, address_type, street, house_number, address_line2,
 			       postal_code, city, state, country, is_primary, created_at, updated_at
@@ -408,7 +408,7 @@ func (r *EmployeeRepository) GetAddress(ctx context.Context, employeeID string) 
 // TENANT-ISOLATED: Inserts/updates only in the tenant's schema
 func (r *EmployeeRepository) SaveAddress(ctx context.Context, addr *EmployeeAddress) error {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
@@ -426,16 +426,16 @@ func (r *EmployeeRepository) SaveAddress(ctx context.Context, addr *EmployeeAddr
 	}
 
 	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-			INSERT INTO employee_addresses (id, employee_id, address_type, street, house_number, address_line2, postal_code, city, state, country, is_primary)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			INSERT INTO employee_addresses (id, tenant_id, employee_id, address_type, street, house_number, address_line2, postal_code, city, state, country, is_primary)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 			ON CONFLICT (id)
-			DO UPDATE SET address_type = $3, street = $4, house_number = $5, address_line2 = $6, postal_code = $7, city = $8, state = $9, country = $10, updated_at = NOW()
+			DO UPDATE SET address_type = $4, street = $5, house_number = $6, address_line2 = $7, postal_code = $8, city = $9, state = $10, country = $11, updated_at = NOW()
 		`
 
 		_, err := r.db.ExecContext(ctx, query,
-			addr.ID, addr.EmployeeID, addr.AddressType, addr.Street, addr.HouseNumber, addr.AddressLine2, addr.PostalCode, addr.City, addr.State, addr.Country, addr.IsPrimary,
+			addr.ID, tenantID, addr.EmployeeID, addr.AddressType, addr.Street, addr.HouseNumber, addr.AddressLine2, addr.PostalCode, addr.City, addr.State, addr.Country, addr.IsPrimary,
 		)
 		return err
 	})
@@ -445,7 +445,7 @@ func (r *EmployeeRepository) SaveAddress(ctx context.Context, addr *EmployeeAddr
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *EmployeeRepository) GetContact(ctx context.Context, employeeID string) (*EmployeeContact, error) {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err // Fail-fast if tenant context missing
 	}
@@ -453,7 +453,7 @@ func (r *EmployeeRepository) GetContact(ctx context.Context, employeeID string) 
 	var contact EmployeeContact
 
 	// Execute query with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, employee_id, contact_type, name, relationship, phone, email,
 			       is_primary, created_at, updated_at
@@ -476,7 +476,7 @@ func (r *EmployeeRepository) GetContact(ctx context.Context, employeeID string) 
 // TENANT-ISOLATED: Inserts/updates only in the tenant's schema
 func (r *EmployeeRepository) SaveContact(ctx context.Context, contact *EmployeeContact) error {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
@@ -491,16 +491,16 @@ func (r *EmployeeRepository) SaveContact(ctx context.Context, contact *EmployeeC
 	}
 
 	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-			INSERT INTO employee_contacts (id, employee_id, contact_type, name, relationship, phone, email, is_primary)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			INSERT INTO employee_contacts (id, tenant_id, employee_id, contact_type, name, relationship, phone, email, is_primary)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			ON CONFLICT (id)
-			DO UPDATE SET contact_type = $3, name = $4, relationship = $5, phone = $6, email = $7, updated_at = NOW()
+			DO UPDATE SET contact_type = $4, name = $5, relationship = $6, phone = $7, email = $8, updated_at = NOW()
 		`
 
 		_, err := r.db.ExecContext(ctx, query,
-			contact.ID, contact.EmployeeID, contact.ContactType, contact.Name,
+			contact.ID, tenantID, contact.EmployeeID, contact.ContactType, contact.Name,
 			contact.Relationship, contact.Phone, contact.Email, contact.IsPrimary,
 		)
 		return err
@@ -511,7 +511,7 @@ func (r *EmployeeRepository) SaveContact(ctx context.Context, contact *EmployeeC
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *EmployeeRepository) GetFinancials(ctx context.Context, employeeID string) (*EmployeeFinancials, error) {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err // Fail-fast if tenant context missing
 	}
@@ -519,7 +519,7 @@ func (r *EmployeeRepository) GetFinancials(ctx context.Context, employeeID strin
 	var fin EmployeeFinancials
 
 	// Execute query with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, employee_id, iban, bic, bank_name, account_holder,
 			       tax_id, tax_class, church_tax, child_allowance,
@@ -544,7 +544,7 @@ func (r *EmployeeRepository) GetFinancials(ctx context.Context, employeeID strin
 // TENANT-ISOLATED: Inserts/updates only in the tenant's schema
 func (r *EmployeeRepository) SaveFinancials(ctx context.Context, fin *EmployeeFinancials) error {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
@@ -554,22 +554,22 @@ func (r *EmployeeRepository) SaveFinancials(ctx context.Context, fin *EmployeeFi
 	}
 
 	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			INSERT INTO employee_financials (
-				id, employee_id, iban, bic, bank_name, account_holder,
+				id, tenant_id, employee_id, iban, bic, bank_name, account_holder,
 				tax_id, tax_class, church_tax, child_allowance,
 				salary_type, base_salary_cents, currency
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			ON CONFLICT (employee_id)
 			DO UPDATE SET
-				iban = $3, bic = $4, bank_name = $5, account_holder = $6,
-				tax_id = $7, tax_class = $8, church_tax = $9, child_allowance = $10,
-				salary_type = $11, base_salary_cents = $12, currency = $13, updated_at = NOW()
+				iban = $4, bic = $5, bank_name = $6, account_holder = $7,
+				tax_id = $8, tax_class = $9, church_tax = $10, child_allowance = $11,
+				salary_type = $12, base_salary_cents = $13, currency = $14, updated_at = NOW()
 		`
 
 		_, err := r.db.ExecContext(ctx, query,
-			fin.ID, fin.EmployeeID, fin.IBAN, fin.BIC, fin.BankName, fin.AccountHolder,
+			fin.ID, tenantID, fin.EmployeeID, fin.IBAN, fin.BIC, fin.BankName, fin.AccountHolder,
 			fin.TaxID, fin.TaxClass, fin.ChurchTax, fin.ChildAllowance,
 			fin.SalaryType, fin.BaseSalaryCents, fin.Currency,
 		)
@@ -581,7 +581,7 @@ func (r *EmployeeRepository) SaveFinancials(ctx context.Context, fin *EmployeeFi
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *EmployeeRepository) ListFiles(ctx context.Context, employeeID string) ([]*EmployeeFile, error) {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err // Fail-fast if tenant context missing
 	}
@@ -589,7 +589,7 @@ func (r *EmployeeRepository) ListFiles(ctx context.Context, employeeID string) (
 	var files []*EmployeeFile
 
 	// Execute query with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `SELECT * FROM employee_files WHERE employee_id = $1 ORDER BY uploaded_at DESC`
 		return r.db.SelectContext(ctx, &files, query, employeeID)
 	})
@@ -605,7 +605,7 @@ func (r *EmployeeRepository) ListFiles(ctx context.Context, employeeID string) (
 // TENANT-ISOLATED: Inserts only into the tenant's schema
 func (r *EmployeeRepository) CreateFile(ctx context.Context, file *EmployeeFile) error {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
@@ -615,15 +615,15 @@ func (r *EmployeeRepository) CreateFile(ctx context.Context, file *EmployeeFile)
 	}
 
 	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-			INSERT INTO employee_files (id, employee_id, name, file_type, file_path, file_size, mime_type, category, uploaded_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			INSERT INTO employee_files (id, tenant_id, employee_id, name, file_type, file_path, file_size, mime_type, category, uploaded_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 			RETURNING uploaded_at
 		`
 
 		return r.db.QueryRowxContext(ctx, query,
-			file.ID, file.EmployeeID, file.Name, file.FileType, file.FilePath,
+			file.ID, tenantID, file.EmployeeID, file.Name, file.FileType, file.FilePath,
 			file.FileSize, file.MimeType, file.Category, file.UploadedBy,
 		).Scan(&file.UploadedAt)
 	})
@@ -633,13 +633,13 @@ func (r *EmployeeRepository) CreateFile(ctx context.Context, file *EmployeeFile)
 // TENANT-ISOLATED: Deletes only from the tenant's schema
 func (r *EmployeeRepository) DeleteFile(ctx context.Context, id string) error {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
 
 	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `DELETE FROM employee_files WHERE id = $1`
 		result, err := r.db.ExecContext(ctx, query, id)
 		if err != nil {
@@ -659,13 +659,13 @@ func (r *EmployeeRepository) DeleteFile(ctx context.Context, id string) error {
 // TENANT-ISOLATED: Updates only in the tenant's schema
 func (r *EmployeeRepository) NullifyUserReferences(ctx context.Context, userID string) error {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
 
 	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `UPDATE employees SET user_id = NULL WHERE user_id = $1`
 		_, err := r.db.ExecContext(ctx, query, userID)
 		return err
@@ -677,13 +677,13 @@ func (r *EmployeeRepository) NullifyUserReferences(ctx context.Context, userID s
 // TENANT-ISOLATED: Updates only in the tenant's schema
 func (r *EmployeeRepository) UpdateUserID(ctx context.Context, employeeID, userID string) error {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
 
 	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// Use conditional update: only update if user_id is currently NULL
 		// This prevents overwriting existing user_id links
 		query := `
@@ -725,13 +725,13 @@ func (r *EmployeeRepository) UpdateUserID(ctx context.Context, employeeID, userI
 // TENANT-ISOLATED: Updates only in the tenant's schema
 func (r *EmployeeRepository) ClearUserID(ctx context.Context, employeeID string) error {
 	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
 
 	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE employees
 			SET user_id = NULL, updated_at = NOW()

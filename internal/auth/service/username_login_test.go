@@ -41,17 +41,15 @@ func TestUsernameLoginFlow_EndToEnd(t *testing.T) {
 			RoleName:     "staff",
 			TenantID:     tenant.ID,
 			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
 		}
 
 		// Directly insert into lookup table (simulating consumer processing)
 		lookup := &repository.UserTenantLookup{
-			Email:        eventData.Email,
-			Username:     eventData.Username,
-			UserID:       eventData.UserID,
-			TenantID:     eventData.TenantID,
-			TenantSlug:   eventData.TenantSlug,
-			TenantSchema: eventData.TenantSchema,
+			Email:      eventData.Email,
+			Username:   eventData.Username,
+			UserID:     eventData.UserID,
+			TenantID:   eventData.TenantID,
+			TenantSlug: eventData.TenantSlug,
 		}
 
 		err := lookupRepo.Upsert(ctx, lookup)
@@ -72,12 +70,11 @@ func TestUsernameLoginFlow_EndToEnd(t *testing.T) {
 
 		// Event without username (nil)
 		lookup := &repository.UserTenantLookup{
-			Email:        email,
-			Username:     nil, // No username
-			UserID:       userID,
-			TenantID:     tenant.ID,
-			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
+			Email:      email,
+			Username:   nil, // No username
+			UserID:     userID,
+			TenantID:   tenant.ID,
+			TenantSlug: tenant.Slug,
 		}
 
 		err := lookupRepo.Upsert(ctx, lookup)
@@ -104,7 +101,6 @@ func TestUserCreatedEvent_UsernameField(t *testing.T) {
 			RoleName:     "staff",
 			TenantID:     "tenant-123",
 			TenantSlug:   "demo-clinic",
-			TenantSchema: "tenant_demo_clinic",
 		}
 
 		assert.NotNil(t, event.Username)
@@ -121,7 +117,6 @@ func TestUserCreatedEvent_UsernameField(t *testing.T) {
 			RoleName:     "staff",
 			TenantID:     "tenant-123",
 			TenantSlug:   "demo-clinic",
-			TenantSchema: "tenant_demo_clinic",
 		}
 
 		assert.Nil(t, event.Username)
@@ -139,12 +134,11 @@ func TestLookupRepository_UsernameOperations(t *testing.T) {
 	t.Run("Upsert preserves username", func(t *testing.T) {
 		username := "preserveuser"
 		lookup := &repository.UserTenantLookup{
-			Email:        "preserve@test.de",
-			Username:     &username,
-			UserID:       uuid.New().String(),
-			TenantID:     tenant.ID,
-			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
+			Email:      "preserve@test.de",
+			Username:   &username,
+			UserID:     uuid.New().String(),
+			TenantID:   tenant.ID,
+			TenantSlug: tenant.Slug,
 		}
 
 		err := repo.Upsert(ctx, lookup)
@@ -162,12 +156,11 @@ func TestLookupRepository_UsernameOperations(t *testing.T) {
 		userID := uuid.New().String()
 
 		lookup := &repository.UserTenantLookup{
-			Email:        "unique@test.de",
-			Username:     &username,
-			UserID:       userID,
-			TenantID:     tenant.ID,
-			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
+			Email:      "unique@test.de",
+			Username:   &username,
+			UserID:     userID,
+			TenantID:   tenant.ID,
+			TenantSlug: tenant.Slug,
 		}
 
 		err := repo.Upsert(ctx, lookup)
@@ -183,12 +176,11 @@ func TestLookupRepository_UsernameOperations(t *testing.T) {
 		username := "isolateduser"
 
 		lookup := &repository.UserTenantLookup{
-			Email:        "isolated@test.de",
-			Username:     &username,
-			UserID:       uuid.New().String(),
-			TenantID:     tenant.ID,
-			TenantSlug:   tenant.Slug,
-			TenantSchema: tenant.SchemaName,
+			Email:      "isolated@test.de",
+			Username:   &username,
+			UserID:     uuid.New().String(),
+			TenantID:   tenant.ID,
+			TenantSlug: tenant.Slug,
 		}
 
 		err := repo.Upsert(ctx, lookup)

@@ -137,14 +137,13 @@ func WithUserContext(ctx context.Context, userID, email, role string) context.Co
 // and adds it to the request context.
 //
 // This middleware is applied to all microservices (user, staff, inventory).
-// It ensures every request has tenant context for database schema isolation.
+// It ensures every request has tenant context for RLS-based isolation.
 //
 // Headers expected (set by gateway's AuthMiddleware):
-//   - X-Tenant-ID: Tenant UUID
-//   - X-Tenant-Slug: Tenant slug (e.g., "test-practice")
-//   - X-Tenant-Schema: Schema name (e.g., "tenant_test_practice")
+//   - X-Tenant-ID: Tenant UUID (REQUIRED for RLS)
+//   - X-Tenant-Slug: Tenant slug (optional, for logging/display)
 //
-// Security: Missing tenant context returns 403 Forbidden (fail-fast).
+// Security: Missing X-Tenant-ID returns 403 Forbidden (fail-fast).
 // Exception: /health endpoints are allowed without tenant context for monitoring.
 func TenantMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -156,17 +155,15 @@ func TenantMiddleware(next http.Handler) http.Handler {
 
 		tenantID := r.Header.Get("X-Tenant-ID")
 		tenantSlug := r.Header.Get("X-Tenant-Slug")
-		tenantSchema := r.Header.Get("X-Tenant-Schema")
 
-		// Validate tenant context is present
-		// This is CRITICAL for security - prevents cross-tenant data access
-		if tenantID == "" || tenantSchema == "" {
+		// Only X-Tenant-ID is required for RLS-based isolation
+		if tenantID == "" {
 			http.Error(w, `{"error":"missing tenant context"}`, http.StatusForbidden)
 			return
 		}
 
 		// Add tenant context to request
-		ctx := tenant.WithTenantContext(r.Context(), tenantID, tenantSlug, tenantSchema)
+		ctx := tenant.WithTenantContext(r.Context(), tenantID, tenantSlug)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

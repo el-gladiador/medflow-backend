@@ -60,10 +60,10 @@ func NewBatchRepository(db *database.DB) *BatchRepository {
 }
 
 // Create creates a new batch
-// TENANT-ISOLATED: Inserts into the tenant's schema
+// TENANT-ISOLATED: Inserts with tenant_id for RLS
 func (r *BatchRepository) Create(ctx context.Context, batch *InventoryBatch) error {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
@@ -77,19 +77,19 @@ func (r *BatchRepository) Create(ctx context.Context, batch *InventoryBatch) err
 		batch.Status = "available"
 	}
 
-	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute query with tenant RLS
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			INSERT INTO inventory_batches (
-				id, item_id, location_id, batch_number, lot_number, initial_quantity,
+				id, tenant_id, item_id, location_id, batch_number, lot_number, initial_quantity,
 				current_quantity, reserved_quantity, manufactured_date, expiry_date,
 				received_date, status
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 			RETURNING created_at, updated_at
 		`
 
 		return r.db.QueryRowxContext(ctx, query,
-			batch.ID, batch.ItemID, batch.LocationID, batch.BatchNumber, batch.LotNumber,
+			batch.ID, tenantID, batch.ItemID, batch.LocationID, batch.BatchNumber, batch.LotNumber,
 			batch.InitialQuantity, batch.CurrentQuantity, batch.ReservedQuantity,
 			batch.ManufacturedDate, batch.ExpiryDate, batch.ReceivedDate, batch.Status,
 		).Scan(&batch.CreatedAt, &batch.UpdatedAt)
@@ -97,18 +97,18 @@ func (r *BatchRepository) Create(ctx context.Context, batch *InventoryBatch) err
 }
 
 // GetByID gets a batch by ID
-// TENANT-ISOLATED: Queries only the tenant's schema
+// TENANT-ISOLATED: Queries via RLS
 func (r *BatchRepository) GetByID(ctx context.Context, id string) (*InventoryBatch, error) {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err // Fail-fast if tenant context missing
 	}
 
 	var batch InventoryBatch
 
-	// Execute query with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute query with tenant RLS
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, item_id, location_id, batch_number, lot_number, initial_quantity,
 			       current_quantity, reserved_quantity, manufactured_date, expiry_date,
@@ -132,18 +132,18 @@ func (r *BatchRepository) GetByID(ctx context.Context, id string) (*InventoryBat
 }
 
 // ListByItem lists batches for an item
-// TENANT-ISOLATED: Returns only batches from the tenant's schema
+// TENANT-ISOLATED: Returns only batches via RLS
 func (r *BatchRepository) ListByItem(ctx context.Context, itemID string) ([]*InventoryBatch, error) {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err // Fail-fast if tenant context missing
 	}
 
 	var batches []*InventoryBatch
 
-	// Execute query with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute query with tenant RLS
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, item_id, location_id, batch_number, lot_number, initial_quantity,
 			       current_quantity, reserved_quantity, manufactured_date, expiry_date,
@@ -171,16 +171,16 @@ func (r *BatchRepository) ListByItem(ctx context.Context, itemID string) ([]*Inv
 }
 
 // Update updates a batch
-// TENANT-ISOLATED: Updates only in the tenant's schema
+// TENANT-ISOLATED: Updates via RLS
 func (r *BatchRepository) Update(ctx context.Context, batch *InventoryBatch) error {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
 
-	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute query with tenant RLS
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE inventory_batches SET
 				location_id = $2, batch_number = $3, lot_number = $4, initial_quantity = $5,
@@ -208,16 +208,16 @@ func (r *BatchRepository) Update(ctx context.Context, batch *InventoryBatch) err
 }
 
 // Delete deletes a batch
-// TENANT-ISOLATED: Deletes only from the tenant's schema
+// TENANT-ISOLATED: Deletes via RLS
 func (r *BatchRepository) Delete(ctx context.Context, id string) error {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
 
-	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute query with tenant RLS
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `DELETE FROM inventory_batches WHERE id = $1`
 		result, err := r.db.ExecContext(ctx, query, id)
 		if err != nil {
@@ -234,18 +234,18 @@ func (r *BatchRepository) Delete(ctx context.Context, id string) error {
 }
 
 // GetTotalStock gets the total stock for an item
-// TENANT-ISOLATED: Queries only the tenant's schema
+// TENANT-ISOLATED: Queries via RLS
 func (r *BatchRepository) GetTotalStock(ctx context.Context, itemID string) (int, error) {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return 0, err // Fail-fast if tenant context missing
 	}
 
 	var total sql.NullInt64
 
-	// Execute query with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute query with tenant RLS
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `SELECT SUM(current_quantity) FROM inventory_batches WHERE item_id = $1 AND status = 'available' AND deleted_at IS NULL AND current_quantity > 0`
 		return r.db.GetContext(ctx, &total, query, itemID)
 	})
@@ -261,18 +261,18 @@ func (r *BatchRepository) GetTotalStock(ctx context.Context, itemID string) (int
 }
 
 // GetExpiringBatches gets batches expiring within days
-// TENANT-ISOLATED: Returns only batches from the tenant's schema
+// TENANT-ISOLATED: Returns only batches via RLS
 func (r *BatchRepository) GetExpiringBatches(ctx context.Context, withinDays int) ([]*InventoryBatch, error) {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err // Fail-fast if tenant context missing
 	}
 
 	var batches []*InventoryBatch
 
-	// Execute query with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute query with tenant RLS
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, item_id, location_id, batch_number, lot_number, initial_quantity,
 			       current_quantity, reserved_quantity, manufactured_date, expiry_date,
@@ -301,18 +301,18 @@ func (r *BatchRepository) GetExpiringBatches(ctx context.Context, withinDays int
 }
 
 // GetExpiredBatches gets expired batches
-// TENANT-ISOLATED: Returns only expired batches from the tenant's schema
+// TENANT-ISOLATED: Returns only expired batches via RLS
 func (r *BatchRepository) GetExpiredBatches(ctx context.Context) ([]*InventoryBatch, error) {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err // Fail-fast if tenant context missing
 	}
 
 	var batches []*InventoryBatch
 
-	// Execute query with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute query with tenant RLS
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, item_id, location_id, batch_number, lot_number, initial_quantity,
 			       current_quantity, reserved_quantity, manufactured_date, expiry_date,
@@ -340,10 +340,10 @@ func (r *BatchRepository) GetExpiredBatches(ctx context.Context) ([]*InventoryBa
 }
 
 // AdjustStock adjusts the stock for a batch
-// TENANT-ISOLATED: Updates and inserts only in the tenant's schema
+// TENANT-ISOLATED: Updates and inserts via RLS
 func (r *BatchRepository) AdjustStock(ctx context.Context, adj *StockAdjustment) error {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
@@ -364,8 +364,8 @@ func (r *BatchRepository) AdjustStock(ctx context.Context, adj *StockAdjustment)
 	}
 	adj.NewQuantity = newQty
 
-	// Execute queries with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute queries with tenant RLS
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// Update batch current_quantity if batch ID provided
 		if adj.BatchID != nil {
 			query := `UPDATE inventory_batches SET current_quantity = $2, updated_at = NOW() WHERE id = $1`
@@ -377,32 +377,32 @@ func (r *BatchRepository) AdjustStock(ctx context.Context, adj *StockAdjustment)
 		// Create adjustment record
 		query := `
 			INSERT INTO stock_adjustments (
-				id, item_id, batch_id, adjustment_type, quantity, previous_quantity,
+				id, tenant_id, item_id, batch_id, adjustment_type, quantity, previous_quantity,
 				new_quantity, reason, performed_by, performed_by_name
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			RETURNING created_at
 		`
 
 		return r.db.QueryRowxContext(ctx, query,
-			adj.ID, adj.ItemID, adj.BatchID, adj.AdjustmentType, adj.Quantity,
+			adj.ID, tenantID, adj.ItemID, adj.BatchID, adj.AdjustmentType, adj.Quantity,
 			adj.PreviousQuantity, adj.NewQuantity, adj.Reason, adj.PerformedBy, adj.PerformedByName,
 		).Scan(&adj.CreatedAt)
 	})
 }
 
 // GetAllActiveBatches gets all active batches
-// TENANT-ISOLATED: Returns only active batches from the tenant's schema
+// TENANT-ISOLATED: Returns only active batches via RLS
 func (r *BatchRepository) GetAllActiveBatches(ctx context.Context) ([]*InventoryBatch, error) {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err // Fail-fast if tenant context missing
 	}
 
 	var batches []*InventoryBatch
 
-	// Execute query with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute query with tenant RLS
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, item_id, location_id, batch_number, lot_number, initial_quantity,
 			       current_quantity, reserved_quantity, manufactured_date, expiry_date,

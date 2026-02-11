@@ -9,44 +9,51 @@ import (
 
 type txKey struct{}
 
-// WithTenantSchema executes a function with search_path set to the tenant's schema.
-// This is the KEY isolation mechanism for schema-per-tenant architecture.
+// WithTenantRLS executes a function with RLS-based tenant isolation.
+// This is the KEY isolation mechanism for RLS-based pooled multi-tenancy.
 //
 // Usage in repositories:
 //
-//	err := r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
-//	    query := `SELECT * FROM employees WHERE id = $1`
-//	    return r.db.GetContext(ctx, &emp, query, id)
+//	tenantID, err := tenant.TenantID(ctx)
+//	if err != nil { return err }
+//	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
+//	    return r.db.GetContext(ctx, &emp, "SELECT * FROM employees WHERE id = $1", id)
 //	})
 //
 // How it works:
 //  1. Starts a transaction
-//  2. Sets "SET LOCAL search_path TO tenant_xxx, public"
-//  3. Stores tx in context
-//  4. Executes user function
-//  5. Commits transaction (auto-cleanup of search_path)
+//  2. Sets "SET LOCAL search_path TO <service_schema>, public" (from db.searchPath)
+//  3. Sets "SET LOCAL app.current_tenant = '<tenant-uuid>'"
+//  4. RLS policies filter rows automatically: USING (tenant_id = current_setting('app.current_tenant')::uuid)
+//  5. Commits transaction (auto-cleanup of session variables)
 //
 // Why this is secure:
-// - SET LOCAL is scoped to transaction (automatic cleanup)
-// - Even with connection pooling, next request gets fresh search_path
-// - PostgreSQL engine enforces schema isolation
-// - If table doesn't exist in schema, query fails (prevents cross-tenant access)
-func (db *DB) WithTenantSchema(ctx context.Context, schemaName string, fn func(context.Context) error) error {
+//   - SET LOCAL is scoped to transaction (automatic cleanup)
+//   - Even with connection pooling (PgBouncer), next request gets clean state
+//   - RLS policies are enforced by PostgreSQL engine — app code can't bypass them
+//   - WITH CHECK prevents inserting rows for wrong tenant
+func (db *DB) WithTenantRLS(ctx context.Context, tenantID string, fn func(context.Context) error) error {
 	return db.Transaction(ctx, func(tx *sqlx.Tx) error {
-		// Set search_path for this transaction
-		// SET LOCAL ensures it's only valid for this transaction
-		// Including 'public' allows access to shared functions (e.g., update_updated_at)
-		query := fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)
+		// Set search_path for the service schema
+		searchPath := db.searchPath
+		if searchPath == "" {
+			searchPath = "public"
+		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", searchPath)); err != nil {
+			return fmt.Errorf("failed to set search_path to %s: %w", searchPath, err)
+		}
 
-		if _, err := tx.ExecContext(ctx, query); err != nil {
-			return fmt.Errorf("failed to set search_path to %s: %w", schemaName, err)
+		// Set tenant context for RLS policies
+		// This is what RLS policies check: current_setting('app.current_tenant')::uuid
+		// NOTE: SET LOCAL doesn't support parameterized queries ($1), must use fmt.Sprintf.
+		// This is safe because tenantID is a UUID validated upstream (not user input).
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("SET LOCAL app.current_tenant = '%s'", tenantID)); err != nil {
+			return fmt.Errorf("failed to set app.current_tenant to %s: %w", tenantID, err)
 		}
 
 		// Store transaction in context so DB methods can use it
 		txCtx := context.WithValue(ctx, txKey{}, tx)
 
-		// Execute user function with tenant-scoped connection
-		// All queries inside fn will execute in the tenant's schema
 		return fn(txCtx)
 	})
 }
@@ -57,15 +64,4 @@ func (db *DB) getTx(ctx context.Context) *sqlx.Tx {
 		return tx
 	}
 	return nil
-}
-
-// WithTenantSchemaReadOnly executes a read-only function with search_path set to tenant's schema.
-// This is an optimization for read-only queries that don't need transaction overhead.
-//
-// IMPORTANT: Only use this for SELECT queries where you don't need ACID guarantees.
-// For any writes (INSERT/UPDATE/DELETE), use WithTenantSchema.
-func (db *DB) WithTenantSchemaReadOnly(ctx context.Context, schemaName string, fn func(context.Context) error) error {
-	// For read-only, we still use a transaction to ensure search_path is scoped
-	// PostgreSQL transactions for reads are lightweight
-	return db.WithTenantSchema(ctx, schemaName, fn)
 }

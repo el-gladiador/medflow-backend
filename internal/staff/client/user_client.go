@@ -57,45 +57,42 @@ type Role struct {
 	Level int    `json:"level"` // Higher level = more permissions (admin=100, manager=50, staff=10)
 }
 
+// setTenantHeaders adds tenant headers to an HTTP request from context
+func setTenantHeaders(ctx context.Context, req *http.Request) {
+	tenantID, _ := tenant.TenantID(ctx)
+	tenantSlug, _ := tenant.TenantSlug(ctx)
+
+	if tenantID != "" {
+		req.Header.Set("X-Tenant-ID", tenantID)
+	}
+	if tenantSlug != "" {
+		req.Header.Set("X-Tenant-Slug", tenantSlug)
+	}
+}
+
 // CreateUser creates a new user account in the user service
 // CRITICAL: This must forward tenant headers to ensure user is created in correct tenant
 func (c *UserClient) CreateUser(ctx context.Context, req *CreateUserRequest) (*User, error) {
-	// Marshal request payload
 	payload, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/users", bytes.NewBuffer(payload))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// CRITICAL: Forward tenant headers - user must be created in same tenant as employee
-	tenantID, _ := tenant.TenantID(ctx)
-	tenantSlug, _ := tenant.TenantSlug(ctx)
-	tenantSchema, _ := tenant.TenantSchema(ctx)
-
-	if tenantID != "" {
-		httpReq.Header.Set("X-Tenant-ID", tenantID)
-	}
-	if tenantSlug != "" {
-		httpReq.Header.Set("X-Tenant-Slug", tenantSlug)
-	}
-	if tenantSchema != "" {
-		httpReq.Header.Set("X-Tenant-Schema", tenantSchema)
-	}
-
+	setTenantHeaders(ctx, httpReq)
 	httpReq.Header.Set("Content-Type", "application/json")
 
+	tenantID, _ := tenant.TenantID(ctx)
 	c.logger.Info().
 		Str("email", req.Email).
 		Str("role", req.RoleName).
 		Str("tenant_id", tenantID).
 		Msg("creating user account via user service")
 
-	// Execute request
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		c.logger.Error().Err(err).Msg("failed to call user service")
@@ -103,7 +100,6 @@ func (c *UserClient) CreateUser(ctx context.Context, req *CreateUserRequest) (*U
 	}
 	defer resp.Body.Close()
 
-	// Check response status
 	if resp.StatusCode != http.StatusCreated {
 		var errResp map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&errResp)
@@ -114,7 +110,6 @@ func (c *UserClient) CreateUser(ctx context.Context, req *CreateUserRequest) (*U
 		return nil, fmt.Errorf("user creation failed with status %d: %v", resp.StatusCode, errResp)
 	}
 
-	// Decode response - user service wraps responses in {"success": true, "data": ...}
 	var response struct {
 		Success bool `json:"success"`
 		Data    User `json:"data"`
@@ -134,33 +129,19 @@ func (c *UserClient) CreateUser(ctx context.Context, req *CreateUserRequest) (*U
 // GetUserByID fetches a user by their ID (for role level validation)
 // CRITICAL: This must forward tenant headers
 func (c *UserClient) GetUserByID(ctx context.Context, userID string) (*User, error) {
-	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/users/"+userID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// CRITICAL: Forward tenant headers
+	setTenantHeaders(ctx, httpReq)
+
 	tenantID, _ := tenant.TenantID(ctx)
-	tenantSlug, _ := tenant.TenantSlug(ctx)
-	tenantSchema, _ := tenant.TenantSchema(ctx)
-
-	if tenantID != "" {
-		httpReq.Header.Set("X-Tenant-ID", tenantID)
-	}
-	if tenantSlug != "" {
-		httpReq.Header.Set("X-Tenant-Slug", tenantSlug)
-	}
-	if tenantSchema != "" {
-		httpReq.Header.Set("X-Tenant-Schema", tenantSchema)
-	}
-
 	c.logger.Debug().
 		Str("user_id", userID).
 		Str("tenant_id", tenantID).
 		Msg("fetching user by ID")
 
-	// Execute request
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call user service: %w", err)
@@ -177,7 +158,6 @@ func (c *UserClient) GetUserByID(ctx context.Context, userID string) (*User, err
 		return nil, fmt.Errorf("get user failed with status %d: %v", resp.StatusCode, errResp)
 	}
 
-	// Decode response - user service wraps responses in {"success": true, "data": ...}
 	var response struct {
 		Success bool `json:"success"`
 		Data    User `json:"data"`
@@ -192,33 +172,19 @@ func (c *UserClient) GetUserByID(ctx context.Context, userID string) (*User, err
 // GetRole fetches role information by name (for role hierarchy validation)
 // CRITICAL: This must forward tenant headers
 func (c *UserClient) GetRole(ctx context.Context, roleName string) (*Role, error) {
-	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/roles/"+roleName, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// CRITICAL: Forward tenant headers
+	setTenantHeaders(ctx, httpReq)
+
 	tenantID, _ := tenant.TenantID(ctx)
-	tenantSlug, _ := tenant.TenantSlug(ctx)
-	tenantSchema, _ := tenant.TenantSchema(ctx)
-
-	if tenantID != "" {
-		httpReq.Header.Set("X-Tenant-ID", tenantID)
-	}
-	if tenantSlug != "" {
-		httpReq.Header.Set("X-Tenant-Slug", tenantSlug)
-	}
-	if tenantSchema != "" {
-		httpReq.Header.Set("X-Tenant-Schema", tenantSchema)
-	}
-
 	c.logger.Debug().
 		Str("role_name", roleName).
 		Str("tenant_id", tenantID).
 		Msg("fetching role by name")
 
-	// Execute request
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call user service: %w", err)
@@ -235,7 +201,6 @@ func (c *UserClient) GetRole(ctx context.Context, roleName string) (*Role, error
 		return nil, fmt.Errorf("get role failed with status %d: %v", resp.StatusCode, errResp)
 	}
 
-	// Decode response - user service wraps responses in {"success": true, "data": ...}
 	var response struct {
 		Success bool `json:"success"`
 		Data    Role `json:"data"`
@@ -250,36 +215,21 @@ func (c *UserClient) GetRole(ctx context.Context, roleName string) (*Role, error
 // SoftDeleteUser soft-deletes a user account (disables login, preserves audit trail)
 // CRITICAL: This must forward tenant headers
 func (c *UserClient) SoftDeleteUser(ctx context.Context, userID string) error {
-	// Create HTTP request - using PATCH to soft-delete (set status to deleted)
 	payload := []byte(`{"status":"deleted"}`)
 	httpReq, err := http.NewRequestWithContext(ctx, "PATCH", c.baseURL+"/api/v1/users/"+userID+"/status", bytes.NewBuffer(payload))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// CRITICAL: Forward tenant headers
-	tenantID, _ := tenant.TenantID(ctx)
-	tenantSlug, _ := tenant.TenantSlug(ctx)
-	tenantSchema, _ := tenant.TenantSchema(ctx)
-
-	if tenantID != "" {
-		httpReq.Header.Set("X-Tenant-ID", tenantID)
-	}
-	if tenantSlug != "" {
-		httpReq.Header.Set("X-Tenant-Slug", tenantSlug)
-	}
-	if tenantSchema != "" {
-		httpReq.Header.Set("X-Tenant-Schema", tenantSchema)
-	}
-
+	setTenantHeaders(ctx, httpReq)
 	httpReq.Header.Set("Content-Type", "application/json")
 
+	tenantID, _ := tenant.TenantID(ctx)
 	c.logger.Info().
 		Str("user_id", userID).
 		Str("tenant_id", tenantID).
 		Msg("soft-deleting user account")
 
-	// Execute request
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		c.logger.Error().Err(err).Msg("failed to soft-delete user")
@@ -298,33 +248,19 @@ func (c *UserClient) SoftDeleteUser(ctx context.Context, userID string) error {
 
 // DeleteUser deletes a user account (for rollback if employee creation fails)
 func (c *UserClient) DeleteUser(ctx context.Context, userID string) error {
-	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, "DELETE", c.baseURL+"/api/v1/users/"+userID, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// CRITICAL: Forward tenant headers
+	setTenantHeaders(ctx, httpReq)
+
 	tenantID, _ := tenant.TenantID(ctx)
-	tenantSlug, _ := tenant.TenantSlug(ctx)
-	tenantSchema, _ := tenant.TenantSchema(ctx)
-
-	if tenantID != "" {
-		httpReq.Header.Set("X-Tenant-ID", tenantID)
-	}
-	if tenantSlug != "" {
-		httpReq.Header.Set("X-Tenant-Slug", tenantSlug)
-	}
-	if tenantSchema != "" {
-		httpReq.Header.Set("X-Tenant-Schema", tenantSchema)
-	}
-
 	c.logger.Warn().
 		Str("user_id", userID).
 		Str("tenant_id", tenantID).
 		Msg("rolling back user account creation")
 
-	// Execute request
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		c.logger.Error().Err(err).Msg("failed to delete user")

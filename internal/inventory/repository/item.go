@@ -57,8 +57,8 @@ func NewItemRepository(db *database.DB) *ItemRepository {
 // Create creates a new inventory item
 // TENANT-ISOLATED: Inserts into the tenant's schema
 func (r *ItemRepository) Create(ctx context.Context, item *InventoryItem) error {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
@@ -72,20 +72,20 @@ func (r *ItemRepository) Create(ctx context.Context, item *InventoryItem) error 
 		item.Currency = "EUR"
 	}
 
-	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute query with tenant RLS
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			INSERT INTO inventory_items (
-				id, name, description, category, unit, unit_price_cents, currency, min_stock,
+				id, tenant_id, name, description, category, unit, unit_price_cents, currency, min_stock,
 				max_stock, reorder_point, reorder_quantity, barcode, article_number, manufacturer,
 				supplier, use_batch_tracking, requires_cooling, is_hazardous, shelf_life_days,
 				default_location_id, is_active
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 			RETURNING created_at, updated_at
 		`
 
 		return r.db.QueryRowxContext(ctx, query,
-			item.ID, item.Name, item.Description, item.Category, item.Unit, item.UnitPriceCents,
+			item.ID, tenantID, item.Name, item.Description, item.Category, item.Unit, item.UnitPriceCents,
 			item.Currency, item.MinStock, item.MaxStock, item.ReorderPoint, item.ReorderQuantity,
 			item.Barcode, item.ArticleNumber, item.Manufacturer, item.Supplier, item.UseBatchTracking,
 			item.RequiresCooling, item.IsHazardous, item.ShelfLifeDays, item.DefaultLocationID,
@@ -97,16 +97,16 @@ func (r *ItemRepository) Create(ctx context.Context, item *InventoryItem) error 
 // GetByID gets an item by ID
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *ItemRepository) GetByID(ctx context.Context, id string) (*InventoryItem, error) {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err // Fail-fast if tenant context missing
 	}
 
 	var item InventoryItem
 
-	// Execute query with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute query with tenant RLS
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, name, description, category, barcode, article_number, manufacturer, supplier,
 			       unit, min_stock, max_stock, reorder_point, reorder_quantity, use_batch_tracking,
@@ -131,18 +131,18 @@ func (r *ItemRepository) GetByID(ctx context.Context, id string) (*InventoryItem
 }
 
 // GetByBarcode gets an item by barcode
-// TENANT-ISOLATED: Queries only the tenant's schema
+// TENANT-ISOLATED: Queries only the tenant's schema via RLS
 func (r *ItemRepository) GetByBarcode(ctx context.Context, barcode string) (*InventoryItem, error) {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err // Fail-fast if tenant context missing
 	}
 
 	var item InventoryItem
 
-	// Execute query with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute query with tenant RLS
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, name, description, category, barcode, article_number, manufacturer, supplier,
 			       unit, min_stock, max_stock, reorder_point, reorder_quantity, use_batch_tracking,
@@ -169,8 +169,8 @@ func (r *ItemRepository) GetByBarcode(ctx context.Context, barcode string) (*Inv
 // List lists inventory items with pagination
 // TENANT-ISOLATED: Returns only items from the tenant's schema
 func (r *ItemRepository) List(ctx context.Context, page, perPage int, category string) ([]*InventoryItem, int64, error) {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, 0, err // Fail-fast if tenant context missing
 	}
@@ -178,8 +178,8 @@ func (r *ItemRepository) List(ctx context.Context, page, perPage int, category s
 	var total int64
 	var items []*InventoryItem
 
-	// Execute queries with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute queries with tenant RLS
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// Count total items
 		countQuery := `SELECT COUNT(*) FROM inventory_items WHERE deleted_at IS NULL`
 		args := []interface{}{}
@@ -239,14 +239,14 @@ func (r *ItemRepository) List(ctx context.Context, page, perPage int, category s
 // Update updates an inventory item
 // TENANT-ISOLATED: Updates only in the tenant's schema
 func (r *ItemRepository) Update(ctx context.Context, item *InventoryItem) error {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
 
-	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute query with tenant RLS
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE inventory_items SET
 				name = $2, description = $3, category = $4, unit = $5, unit_price_cents = $6,
@@ -280,14 +280,14 @@ func (r *ItemRepository) Update(ctx context.Context, item *InventoryItem) error 
 // SoftDelete soft deletes an item
 // TENANT-ISOLATED: Soft deletes only in the tenant's schema
 func (r *ItemRepository) SoftDelete(ctx context.Context, id string) error {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err // Fail-fast if tenant context missing
 	}
 
-	// Execute query with tenant's search_path
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute query with tenant RLS
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `UPDATE inventory_items SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
 		result, err := r.db.ExecContext(ctx, query, id)
 		if err != nil {
@@ -306,16 +306,16 @@ func (r *ItemRepository) SoftDelete(ctx context.Context, id string) error {
 // GetAllActive gets all active items
 // TENANT-ISOLATED: Returns only active items from the tenant's schema
 func (r *ItemRepository) GetAllActive(ctx context.Context) ([]*InventoryItem, error) {
-	// Extract tenant schema from context
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err // Fail-fast if tenant context missing
 	}
 
 	var items []*InventoryItem
 
-	// Execute query with tenant's search_path
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	// Execute query with tenant RLS
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, name, description, category, barcode, article_number, manufacturer, supplier,
 			       unit, min_stock, max_stock, reorder_point, reorder_quantity, use_batch_tracking,

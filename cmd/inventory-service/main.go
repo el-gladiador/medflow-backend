@@ -35,24 +35,29 @@ func main() {
 	log := logger.New("inventory-service", cfg.Server.Environment)
 	log.Info().Msg("starting Inventory Service")
 
-	// Connect to database
-	db, err := database.New(&cfg.Database, log)
+	// Connect to database (single Supabase DB, search_path = inventory, public)
+	db, err := database.NewWithSearchPath(&cfg.Database, cfg.Database.SearchPath, log)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to connect to database")
 	}
 	defer db.Close()
 
-	// Connect to RabbitMQ
-	rmq, err := messaging.New(&cfg.RabbitMQ, log)
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to connect to RabbitMQ")
+	// Connect to RabbitMQ (optional — nil if unavailable)
+	rmq := messaging.NewOptional(&cfg.RabbitMQ, log)
+	if rmq != nil {
+		defer rmq.Close()
 	}
-	defer rmq.Close()
 
-	// Initialize event publisher
-	publisher, err := events.NewInventoryEventPublisher(rmq, log)
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to create event publisher")
+	// Initialize event publisher (nil-safe if RabbitMQ is unavailable)
+	var publisher *events.InventoryEventPublisher
+	if rmq != nil {
+		var err error
+		publisher, err = events.NewInventoryEventPublisher(rmq, log)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to create event publisher")
+		}
+	} else {
+		log.Warn().Msg("event publishing disabled (no RabbitMQ)")
 	}
 
 	// Initialize repositories
@@ -72,17 +77,20 @@ func main() {
 	alertHandler := handler.NewAlertHandler(alertRepo, log)
 	dashboardHandler := handler.NewDashboardHandler(inventoryService, log)
 
-	// Start user event consumer
-	userConsumer, err := consumers.NewUserEventConsumer(rmq, userCacheRepo, log)
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to create user event consumer")
-	}
-
+	// Start user event consumer (if RabbitMQ is available)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := userConsumer.Start(ctx); err != nil {
-		log.Fatal().Err(err).Msg("failed to start user event consumer")
+	if rmq != nil {
+		userConsumer, err := consumers.NewUserEventConsumer(rmq, userCacheRepo, log)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to create user event consumer")
+		}
+		if err := userConsumer.Start(ctx); err != nil {
+			log.Fatal().Err(err).Msg("failed to start user event consumer")
+		}
+	} else {
+		log.Warn().Msg("user event consumer disabled (no RabbitMQ)")
 	}
 
 	// Create router
@@ -97,12 +105,17 @@ func main() {
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		httputil.JSON(w, http.StatusOK, map[string]interface{}{
+		health := map[string]interface{}{
 			"status":   "healthy",
 			"service":  "inventory-service",
 			"database": db.Health(r.Context()),
-			"rabbitmq": rmq.Health(),
-		})
+		}
+		if rmq != nil {
+			health["rabbitmq"] = rmq.Health()
+		} else {
+			health["rabbitmq"] = map[string]string{"status": "disabled"}
+		}
+		httputil.JSON(w, http.StatusOK, health)
 	})
 
 	// API routes

@@ -1,8 +1,14 @@
 # MedFlow Multi-Tenancy Design
 
-**Version**: 2.0
-**Architecture**: Schema-per-Tenant
-**Status**: Approved
+> **DEPRECATED**: This document describes the old schema-per-tenant architecture.
+> MedFlow has migrated to **RLS-based pooled multi-tenancy** (Feb 2026).
+> The current architecture is documented in the root `CLAUDE.md` file.
+> Key changes: no more per-tenant schemas, `schema_name` removed from tenants table,
+> isolation via `tenant_id` columns + RLS policies + `SET LOCAL app.current_tenant`.
+
+**Version**: 2.0 (OUTDATED)
+**Architecture**: Schema-per-Tenant (SUPERSEDED by RLS-based pooled multi-tenancy)
+**Status**: Deprecated
 **Last Updated**: 2026-01-30
 
 ## Table of Contents

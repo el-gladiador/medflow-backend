@@ -605,7 +605,7 @@ func (s *UserService) ValidateCredentials(ctx context.Context, email, password s
 	}
 
 	// Now that we know the tenant, create tenant context and fetch role/permissions
-	tenantCtx := tenant.WithTenantContext(ctx, tenantInfo.ID, tenantInfo.Slug, tenantInfo.SchemaName)
+	tenantCtx := tenant.WithTenantContext(ctx, tenantInfo.ID, tenantInfo.Slug)
 
 	// Fetch user with role and permissions from tenant's schema using user_roles junction table
 	fullUser, err := s.userRepo.GetUserWithRoleFromJunction(tenantCtx, user.ID)

@@ -33,36 +33,36 @@ func NewUserCacheRepository(db *database.DB) *UserCacheRepository {
 }
 
 // Set creates or updates a cached user
-// TENANT-ISOLATED: Uses tenant schema from context
+// TENANT-ISOLATED: Uses tenant ID from context for RLS
 func (r *UserCacheRepository) Set(ctx context.Context, user *CachedUser) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-			INSERT INTO user_cache (user_id, first_name, last_name, email, role_name, tenant_id, updated_at)
+			INSERT INTO user_cache (user_id, tenant_id, first_name, last_name, email, role_name, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, NOW())
 			ON CONFLICT (user_id)
-			DO UPDATE SET first_name = $2, last_name = $3, email = $4, role_name = $5, updated_at = NOW()
+			DO UPDATE SET first_name = $3, last_name = $4, email = $5, role_name = $6, updated_at = NOW()
 		`
 
-		_, err := r.db.ExecContext(ctx, query, user.UserID, user.FirstName, user.LastName, user.Email, user.RoleName, user.TenantID)
+		_, err := r.db.ExecContext(ctx, query, user.UserID, tenantID, user.FirstName, user.LastName, user.Email, user.RoleName)
 		return err
 	})
 }
 
 // Get gets a cached user by ID
-// TENANT-ISOLATED: Uses tenant schema from context
+// TENANT-ISOLATED: Uses tenant ID from context for RLS
 func (r *UserCacheRepository) Get(ctx context.Context, userID string) (*CachedUser, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var user CachedUser
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `SELECT user_id, first_name, last_name, email, role_name, tenant_id FROM user_cache WHERE user_id = $1`
 		return r.db.GetContext(ctx, &user, query, userID)
 	})
@@ -75,14 +75,14 @@ func (r *UserCacheRepository) Get(ctx context.Context, userID string) (*CachedUs
 }
 
 // Delete deletes a cached user
-// TENANT-ISOLATED: Uses tenant schema from context
+// TENANT-ISOLATED: Uses tenant ID from context for RLS
 func (r *UserCacheRepository) Delete(ctx context.Context, userID string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `DELETE FROM user_cache WHERE user_id = $1`
 		_, err := r.db.ExecContext(ctx, query, userID)
 		return err

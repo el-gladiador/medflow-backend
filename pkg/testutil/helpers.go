@@ -67,7 +67,6 @@ type HTTPTestCase struct {
 	Headers        map[string]string
 	TenantID       string
 	TenantSlug     string
-	TenantSchema   string
 	UserID         string
 	WantStatus     int
 	WantBody       string
@@ -92,15 +91,12 @@ func NewHTTPRequest(method, path string, body interface{}) *http.Request {
 }
 
 // WithTenantHeaders adds tenant headers to the request
-func WithTenantHeaders(req *http.Request, tenantID, tenantSlug, tenantSchema string) *http.Request {
+func WithTenantHeaders(req *http.Request, tenantID, tenantSlug string) *http.Request {
 	if tenantID != "" {
 		req.Header.Set("X-Tenant-ID", tenantID)
 	}
 	if tenantSlug != "" {
 		req.Header.Set("X-Tenant-Slug", tenantSlug)
-	}
-	if tenantSchema != "" {
-		req.Header.Set("X-Tenant-Schema", tenantSchema)
 	}
 	return req
 }

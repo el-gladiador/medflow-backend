@@ -21,9 +21,9 @@ func NewAuditRepository(db *database.DB) *AuditRepository {
 }
 
 // Create creates a new audit log entry
-// TENANT-ISOLATED: Inserts into the tenant's schema
+// TENANT-ISOLATED: Inserts with tenant_id for RLS filtering
 func (r *AuditRepository) Create(ctx context.Context, log *domain.AuditLog) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -47,17 +47,18 @@ func (r *AuditRepository) Create(ctx context.Context, log *domain.AuditLog) erro
 		newValuesJSON = nil
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-			INSERT INTO audit_logs (id, actor_id, actor_name, action, resource_type, resource_id,
+			INSERT INTO audit_logs (id, tenant_id, actor_id, actor_name, action, resource_type, resource_id,
 			                        target_user_id, target_user_name, old_values, new_values,
 			                        details, ip_address, user_agent)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			RETURNING created_at
 		`
 
 		return r.db.QueryRowxContext(ctx, query,
 			log.ID,
+			tenantID,
 			log.ActorID,
 			log.ActorName,
 			log.Action,
@@ -84,9 +85,9 @@ type ListFilter struct {
 }
 
 // List lists audit logs with pagination and filtering
-// TENANT-ISOLATED: Returns only audit logs from the tenant's schema
+// TENANT-ISOLATED: Returns only audit logs visible to the tenant via RLS
 func (r *AuditRepository) List(ctx context.Context, filter *ListFilter, page, perPage int) ([]*domain.AuditLog, int64, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -94,7 +95,7 @@ func (r *AuditRepository) List(ctx context.Context, filter *ListFilter, page, pe
 	var total int64
 	var logs []*domain.AuditLog
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		args := []interface{}{}
 		argIndex := 1
 

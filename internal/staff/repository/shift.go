@@ -81,7 +81,7 @@ func NewShiftRepository(db *database.DB) *ShiftRepository {
 // CreateTemplate creates a new shift template
 // TENANT-ISOLATED: Inserts into the tenant's schema
 func (r *ShiftRepository) CreateTemplate(ctx context.Context, tmpl *ShiftTemplate) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -98,16 +98,16 @@ func (r *ShiftRepository) CreateTemplate(ctx context.Context, tmpl *ShiftTemplat
 		tmpl.Color = "#22c55e"
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			INSERT INTO shift_templates (
-				id, name, description, start_time, end_time,
+				id, tenant_id, name, description, start_time, end_time,
 				break_duration_minutes, shift_type, color, is_active, created_by
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			RETURNING created_at, updated_at
 		`
 		return r.db.QueryRowxContext(ctx, query,
-			tmpl.ID, tmpl.Name, tmpl.Description, tmpl.StartTime, tmpl.EndTime,
+			tmpl.ID, tenantID, tmpl.Name, tmpl.Description, tmpl.StartTime, tmpl.EndTime,
 			tmpl.BreakDurationMinutes, tmpl.ShiftType, tmpl.Color, tmpl.IsActive, tmpl.CreatedBy,
 		).Scan(&tmpl.CreatedAt, &tmpl.UpdatedAt)
 	})
@@ -116,14 +116,14 @@ func (r *ShiftRepository) CreateTemplate(ctx context.Context, tmpl *ShiftTemplat
 // GetTemplateByID gets a shift template by ID
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *ShiftRepository) GetTemplateByID(ctx context.Context, id string) (*ShiftTemplate, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var tmpl ShiftTemplate
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, name, description,
 			       start_time::text as start_time, end_time::text as end_time,
@@ -148,14 +148,14 @@ func (r *ShiftRepository) GetTemplateByID(ctx context.Context, id string) (*Shif
 // ListTemplates lists all active shift templates
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *ShiftRepository) ListTemplates(ctx context.Context, activeOnly bool) ([]*ShiftTemplate, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var templates []*ShiftTemplate
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, name, description,
 			       start_time::text as start_time, end_time::text as end_time,
@@ -182,12 +182,12 @@ func (r *ShiftRepository) ListTemplates(ctx context.Context, activeOnly bool) ([
 // UpdateTemplate updates a shift template
 // TENANT-ISOLATED: Updates only in the tenant's schema
 func (r *ShiftRepository) UpdateTemplate(ctx context.Context, tmpl *ShiftTemplate) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE shift_templates SET
 				name = $2, description = $3, start_time = $4, end_time = $5,
@@ -214,12 +214,12 @@ func (r *ShiftRepository) UpdateTemplate(ctx context.Context, tmpl *ShiftTemplat
 // DeleteTemplate soft deletes a shift template
 // TENANT-ISOLATED: Soft deletes only in the tenant's schema
 func (r *ShiftRepository) DeleteTemplate(ctx context.Context, id string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `UPDATE shift_templates SET deleted_at = NOW(), is_active = false WHERE id = $1 AND deleted_at IS NULL`
 		result, err := r.db.ExecContext(ctx, query, id)
 		if err != nil {
@@ -242,7 +242,7 @@ func (r *ShiftRepository) DeleteTemplate(ctx context.Context, id string) error {
 // CreateAssignment creates a new shift assignment
 // TENANT-ISOLATED: Inserts into the tenant's schema
 func (r *ShiftRepository) CreateAssignment(ctx context.Context, shift *ShiftAssignment) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
@@ -259,16 +259,16 @@ func (r *ShiftRepository) CreateAssignment(ctx context.Context, shift *ShiftAssi
 		shift.ShiftType = "regular"
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			INSERT INTO shift_assignments (
-				id, employee_id, shift_template_id, shift_date, start_time, end_time,
+				id, tenant_id, employee_id, shift_template_id, shift_date, start_time, end_time,
 				break_duration_minutes, shift_type, status, has_conflict, conflict_reason, notes, created_by
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			RETURNING created_at, updated_at
 		`
 		return r.db.QueryRowxContext(ctx, query,
-			shift.ID, shift.EmployeeID, shift.ShiftTemplateID, shift.ShiftDate, shift.StartTime, shift.EndTime,
+			shift.ID, tenantID, shift.EmployeeID, shift.ShiftTemplateID, shift.ShiftDate, shift.StartTime, shift.EndTime,
 			shift.BreakDurationMinutes, shift.ShiftType, shift.Status, shift.HasConflict, shift.ConflictReason,
 			shift.Notes, shift.CreatedBy,
 		).Scan(&shift.CreatedAt, &shift.UpdatedAt)
@@ -278,14 +278,14 @@ func (r *ShiftRepository) CreateAssignment(ctx context.Context, shift *ShiftAssi
 // GetAssignmentByID gets a shift assignment by ID
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *ShiftRepository) GetAssignmentByID(ctx context.Context, id string) (*ShiftAssignment, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var shift ShiftAssignment
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT sa.id, sa.employee_id, sa.shift_template_id, sa.shift_date,
 			       sa.start_time::text as start_time, sa.end_time::text as end_time,
@@ -314,7 +314,7 @@ func (r *ShiftRepository) GetAssignmentByID(ctx context.Context, id string) (*Sh
 // ListAssignments lists shift assignments with filters
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *ShiftRepository) ListAssignments(ctx context.Context, params ShiftListParams) ([]*ShiftAssignment, int64, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -322,7 +322,7 @@ func (r *ShiftRepository) ListAssignments(ctx context.Context, params ShiftListP
 	var total int64
 	var shifts []*ShiftAssignment
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// Build WHERE clause
 		whereClause := "WHERE sa.deleted_at IS NULL"
 		args := []interface{}{}
@@ -397,14 +397,14 @@ func (r *ShiftRepository) ListAssignments(ctx context.Context, params ShiftListP
 // GetAssignmentsForDate gets all shifts for a specific date
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *ShiftRepository) GetAssignmentsForDate(ctx context.Context, date time.Time) ([]*ShiftAssignment, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var shifts []*ShiftAssignment
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT sa.id, sa.employee_id, sa.shift_template_id, sa.shift_date,
 			       sa.start_time::text as start_time, sa.end_time::text as end_time,
@@ -431,14 +431,14 @@ func (r *ShiftRepository) GetAssignmentsForDate(ctx context.Context, date time.T
 // GetEmployeeShiftsForDateRange gets shifts for an employee in a date range
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *ShiftRepository) GetEmployeeShiftsForDateRange(ctx context.Context, employeeID string, startDate, endDate time.Time) ([]*ShiftAssignment, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var shifts []*ShiftAssignment
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, employee_id, shift_template_id, shift_date,
 			       start_time::text as start_time, end_time::text as end_time,
@@ -462,12 +462,12 @@ func (r *ShiftRepository) GetEmployeeShiftsForDateRange(ctx context.Context, emp
 // UpdateAssignment updates a shift assignment
 // TENANT-ISOLATED: Updates only in the tenant's schema
 func (r *ShiftRepository) UpdateAssignment(ctx context.Context, shift *ShiftAssignment) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE shift_assignments SET
 				shift_template_id = $2, shift_date = $3, start_time = $4, end_time = $5,
@@ -496,12 +496,12 @@ func (r *ShiftRepository) UpdateAssignment(ctx context.Context, shift *ShiftAssi
 // DeleteAssignment soft deletes a shift assignment
 // TENANT-ISOLATED: Soft deletes only in the tenant's schema
 func (r *ShiftRepository) DeleteAssignment(ctx context.Context, id string) error {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `UPDATE shift_assignments SET deleted_at = NOW(), status = 'cancelled' WHERE id = $1 AND deleted_at IS NULL`
 		result, err := r.db.ExecContext(ctx, query, id)
 		if err != nil {
@@ -524,12 +524,12 @@ func (r *ShiftRepository) BulkCreateAssignments(ctx context.Context, shifts []*S
 		return nil
 	}
 
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return err
 	}
 
-	return r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		for _, shift := range shifts {
 			if shift.ID == "" {
 				shift.ID = uuid.New().String()
@@ -543,13 +543,13 @@ func (r *ShiftRepository) BulkCreateAssignments(ctx context.Context, shifts []*S
 
 			query := `
 				INSERT INTO shift_assignments (
-					id, employee_id, shift_template_id, shift_date, start_time, end_time,
+					id, tenant_id, employee_id, shift_template_id, shift_date, start_time, end_time,
 					break_duration_minutes, shift_type, status, has_conflict, conflict_reason, notes, created_by
-				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 				RETURNING created_at, updated_at
 			`
 			if err := r.db.QueryRowxContext(ctx, query,
-				shift.ID, shift.EmployeeID, shift.ShiftTemplateID, shift.ShiftDate, shift.StartTime, shift.EndTime,
+				shift.ID, tenantID, shift.EmployeeID, shift.ShiftTemplateID, shift.ShiftDate, shift.StartTime, shift.EndTime,
 				shift.BreakDurationMinutes, shift.ShiftType, shift.Status, shift.HasConflict, shift.ConflictReason,
 				shift.Notes, shift.CreatedBy,
 			).Scan(&shift.CreatedAt, &shift.UpdatedAt); err != nil {
@@ -616,7 +616,7 @@ func (r *ShiftRepository) ListAssignmentsByEmployeeAndDateRange(ctx context.Cont
 // CheckForConflicts checks if a shift assignment conflicts with existing shifts or violates rest period
 // TENANT-ISOLATED: Queries only the tenant's schema
 func (r *ShiftRepository) CheckForConflicts(ctx context.Context, employeeID string, shiftDate time.Time, startTime, endTime string, excludeID *string) (bool, string, error) {
-	tenantSchema, err := tenant.TenantSchema(ctx)
+	tenantID, err := tenant.TenantID(ctx)
 	if err != nil {
 		return false, "", err
 	}
@@ -625,7 +625,7 @@ func (r *ShiftRepository) CheckForConflicts(ctx context.Context, employeeID stri
 	var hasConflict bool
 	var reason string
 
-	err = r.db.WithTenantSchema(ctx, tenantSchema, func(ctx context.Context) error {
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		// Check for overlapping shifts on the same day
 		overlapQuery := `
 			SELECT COUNT(*) FROM shift_assignments

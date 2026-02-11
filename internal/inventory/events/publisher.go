@@ -29,6 +29,7 @@ func NewInventoryEventPublisher(rmq *messaging.RabbitMQ, log *logger.Logger) (*I
 
 // PublishStockAdjusted publishes a stock adjusted event
 func (p *InventoryEventPublisher) PublishStockAdjusted(ctx context.Context, adj *repository.StockAdjustment) {
+	if p == nil { return }
 	batchID := ""
 	if adj.BatchID != nil {
 		batchID = *adj.BatchID
@@ -55,6 +56,7 @@ func (p *InventoryEventPublisher) PublishStockAdjusted(ctx context.Context, adj 
 
 // PublishAlertGenerated publishes an alert generated event
 func (p *InventoryEventPublisher) PublishAlertGenerated(ctx context.Context, alert *repository.InventoryAlert) {
+	if p == nil { return }
 	batchID := ""
 	if alert.BatchID != nil {
 		batchID = *alert.BatchID

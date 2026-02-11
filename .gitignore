@@ -28,6 +28,7 @@ vendor/
 .env.*.local
 deployments/.env
 deployments/.env.local
+deployments/.env.supabase
 deployments/.env.staging
 deployments/.env.production
 # Keep .env.example, .env.docker, and *.example files tracked
