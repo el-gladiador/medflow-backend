@@ -120,22 +120,28 @@ func LoadWithValidation(serviceName string) (*Config, error) {
 		return nil, err
 	}
 
-	// Validate database configuration for the environment
-	if err := cfg.Database.Validate(cfg.Server.Environment); err != nil {
-		return nil, fmt.Errorf("database configuration error: %w", err)
-	}
+	// The API gateway is a proxy — it doesn't use database or RabbitMQ directly.
+	// Only validate DB/RabbitMQ for backend services that actually need them.
+	needsDB := serviceName != "api-gateway"
 
-	// Validate JWT secret in production
 	if cfg.Server.Environment == EnvProduction || cfg.Server.Environment == EnvStaging {
+		// Validate database configuration for services that need it
+		if needsDB {
+			if err := cfg.Database.Validate(cfg.Server.Environment); err != nil {
+				return nil, fmt.Errorf("database configuration error: %w", err)
+			}
+		}
+
+		// Validate JWT secret (all services need this)
 		if cfg.JWT.Secret == "" || cfg.JWT.Secret == "dev-secret-change-in-production" {
 			return nil, errors.New("MEDFLOW_JWT_SECRET must be set to a secure value in " + cfg.Server.Environment)
 		}
-	}
 
-	// Validate RabbitMQ URL in production
-	if cfg.Server.Environment == EnvProduction || cfg.Server.Environment == EnvStaging {
-		if cfg.RabbitMQ.URL == "" || strings.Contains(cfg.RabbitMQ.URL, "localhost") {
-			return nil, errors.New("MEDFLOW_RABBITMQ_URL must be set to a non-localhost value in " + cfg.Server.Environment)
+		// Validate RabbitMQ URL for services that need it
+		if needsDB {
+			if cfg.RabbitMQ.URL == "" || strings.Contains(cfg.RabbitMQ.URL, "localhost") {
+				return nil, errors.New("MEDFLOW_RABBITMQ_URL must be set to a non-localhost value in " + cfg.Server.Environment)
+			}
 		}
 	}
 
