@@ -37,8 +37,9 @@ type Employee struct {
 	TerminationDate *time.Time `db:"termination_date" json:"termination_date,omitempty"`
 
 	// Status and metadata
-	Status    string     `db:"status" json:"status"` // active, on_leave, suspended, terminated, pending
-	Notes     *string    `db:"notes" json:"notes,omitempty"`
+	Status         string `db:"status" json:"status"` // active, on_leave, suspended, terminated, pending
+	ShowInStaffList bool   `db:"show_in_staff_list" json:"show_in_staff_list"`
+	Notes          *string `db:"notes" json:"notes,omitempty"`
 	CreatedAt time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt time.Time  `db:"updated_at" json:"updated_at"`
 	DeletedAt *time.Time `db:"deleted_at" json:"-"`
@@ -169,20 +170,27 @@ func (r *EmployeeRepository) Create(ctx context.Context, emp *Employee) error {
 				id, tenant_id, user_id, employee_number, first_name, last_name, avatar_url,
 				date_of_birth, gender, nationality,
 				job_title, department, employment_type, hire_date,
-				probation_end_date, termination_date, status, notes,
+				probation_end_date, termination_date, status, show_in_staff_list, notes,
 				email, phone, mobile, created_by
 			) VALUES (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
 			) RETURNING created_at, updated_at
 		`
 
-		return r.db.QueryRowxContext(ctx, query,
+		err := r.db.QueryRowxContext(ctx, query,
 			emp.ID, tenantID, emp.UserID, emp.EmployeeNumber, emp.FirstName, emp.LastName, emp.AvatarURL,
 			emp.DateOfBirth, emp.Gender, emp.Nationality,
 			emp.JobTitle, emp.Department, emp.EmploymentType, emp.HireDate,
-			emp.ProbationEnd, emp.TerminationDate, emp.Status, emp.Notes,
+			emp.ProbationEnd, emp.TerminationDate, emp.Status, emp.ShowInStaffList, emp.Notes,
 			emp.Email, emp.Phone, emp.Mobile, emp.CreatedBy,
 		).Scan(&emp.CreatedAt, &emp.UpdatedAt)
+		if err != nil {
+			if appErr := database.MapPQError(err); appErr != nil {
+				return appErr
+			}
+			return err
+		}
+		return nil
 	})
 }
 
@@ -203,7 +211,7 @@ func (r *EmployeeRepository) GetByID(ctx context.Context, id string) (*Employee,
 			SELECT id, user_id, employee_number, first_name, last_name, avatar_url,
 			       date_of_birth, gender, nationality,
 			       job_title, department, employment_type, hire_date,
-			       probation_end_date, termination_date, status, notes,
+			       probation_end_date, termination_date, status, show_in_staff_list, notes,
 			       email, phone, mobile, created_by, updated_by,
 			       created_at, updated_at
 			FROM employees
@@ -240,7 +248,7 @@ func (r *EmployeeRepository) GetByUserID(ctx context.Context, userID string) (*E
 			SELECT id, user_id, employee_number, first_name, last_name, avatar_url,
 			       date_of_birth, gender, nationality,
 			       job_title, department, employment_type, hire_date,
-			       probation_end_date, termination_date, status, notes,
+			       probation_end_date, termination_date, status, show_in_staff_list, notes,
 			       email, phone, mobile, created_by, updated_by,
 			       created_at, updated_at
 			FROM employees
@@ -286,7 +294,7 @@ func (r *EmployeeRepository) List(ctx context.Context, page, perPage int) ([]*Em
 			SELECT id, user_id, employee_number, first_name, last_name, avatar_url,
 			       date_of_birth, gender, nationality,
 			       job_title, department, employment_type, hire_date,
-			       probation_end_date, termination_date, status, notes,
+			       probation_end_date, termination_date, status, show_in_staff_list, notes,
 			       email, phone, mobile, created_by, updated_by,
 			       created_at, updated_at
 			FROM employees
@@ -321,8 +329,8 @@ func (r *EmployeeRepository) Update(ctx context.Context, emp *Employee) error {
 				user_id = $2, employee_number = $3, first_name = $4, last_name = $5, avatar_url = $6,
 				date_of_birth = $7, gender = $8, nationality = $9,
 				job_title = $10, department = $11, employment_type = $12, hire_date = $13,
-				probation_end_date = $14, termination_date = $15, status = $16, notes = $17,
-				email = $18, phone = $19, mobile = $20, updated_by = $21,
+				probation_end_date = $14, termination_date = $15, status = $16, show_in_staff_list = $17, notes = $18,
+				email = $19, phone = $20, mobile = $21, updated_by = $22,
 				updated_at = NOW()
 			WHERE id = $1 AND deleted_at IS NULL
 		`
@@ -331,10 +339,13 @@ func (r *EmployeeRepository) Update(ctx context.Context, emp *Employee) error {
 			emp.ID, emp.UserID, emp.EmployeeNumber, emp.FirstName, emp.LastName, emp.AvatarURL,
 			emp.DateOfBirth, emp.Gender, emp.Nationality,
 			emp.JobTitle, emp.Department, emp.EmploymentType, emp.HireDate,
-			emp.ProbationEnd, emp.TerminationDate, emp.Status, emp.Notes,
+			emp.ProbationEnd, emp.TerminationDate, emp.Status, emp.ShowInStaffList, emp.Notes,
 			emp.Email, emp.Phone, emp.Mobile, emp.UpdatedBy,
 		)
 		if err != nil {
+			if appErr := database.MapPQError(err); appErr != nil {
+				return appErr
+			}
 			return err
 		}
 
@@ -713,6 +724,35 @@ func (r *EmployeeRepository) UpdateUserID(ctx context.Context, employeeID, userI
 			if existingUserID != nil {
 				return errors.Conflict("employee already has user credentials")
 			}
+			return errors.NotFound("employee")
+		}
+
+		return nil
+	})
+}
+
+// UpdateVisibility updates the show_in_staff_list flag for an employee
+// TENANT-ISOLATED: Updates only in the tenant's schema
+func (r *EmployeeRepository) UpdateVisibility(ctx context.Context, employeeID string, showInStaffList bool) error {
+	tenantID, err := tenant.TenantID(ctx)
+	if err != nil {
+		return err
+	}
+
+	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
+		query := `
+			UPDATE employees
+			SET show_in_staff_list = $2, updated_at = NOW()
+			WHERE id = $1 AND deleted_at IS NULL
+		`
+
+		result, err := r.db.ExecContext(ctx, query, employeeID, showInStaffList)
+		if err != nil {
+			return err
+		}
+
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
 			return errors.NotFound("employee")
 		}
 

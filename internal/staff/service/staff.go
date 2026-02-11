@@ -182,6 +182,21 @@ func (e *ValidationError) Error() string {
 	return e.Message
 }
 
+// GetMyEmployee returns the employee record for the given user ID
+func (s *StaffService) GetMyEmployee(ctx context.Context, userID string) (*repository.Employee, error) {
+	return s.employeeRepo.GetByUserID(ctx, userID)
+}
+
+// UpdateMyVisibility updates the show_in_staff_list flag for the calling user's employee record
+func (s *StaffService) UpdateMyVisibility(ctx context.Context, userID string, showInStaffList bool) error {
+	emp, err := s.employeeRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	return s.employeeRepo.UpdateVisibility(ctx, emp.ID, showInStaffList)
+}
+
 // ============================================================================
 // CREDENTIAL MANAGEMENT
 // ============================================================================

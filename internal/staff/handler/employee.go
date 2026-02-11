@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/medflow/medflow-backend/internal/staff/client"
@@ -130,7 +131,17 @@ func (h *EmployeeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		user, err := h.userClient.CreateUser(r.Context(), userReq)
 		if err != nil {
 			h.logger.Error().Err(err).Msg("failed to create user account")
-			httputil.Error(w, err)
+			// Convert user service errors to AppErrors for proper HTTP status codes
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "status 400") || strings.Contains(errMsg, "VALIDATION_ERROR") {
+				httputil.Error(w, errors.Validation(map[string]string{
+					"credentials": "user account creation failed: invalid data (check email format and password)",
+				}))
+			} else if strings.Contains(errMsg, "status 409") {
+				httputil.Error(w, errors.Conflict("a user with this email already exists"))
+			} else {
+				httputil.Error(w, errors.Internal("failed to create user account"))
+			}
 			return
 		}
 
@@ -359,6 +370,49 @@ func strPtr(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// GetMe returns the employee record for the currently authenticated user
+// GET /employees/me
+func (h *EmployeeHandler) GetMe(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		httputil.Error(w, errors.Unauthorized("missing user context"))
+		return
+	}
+
+	emp, err := h.service.GetMyEmployee(r.Context(), userID)
+	if err != nil {
+		httputil.Error(w, err)
+		return
+	}
+
+	httputil.JSON(w, http.StatusOK, emp)
+}
+
+// UpdateMyVisibility updates the show_in_staff_list flag for the current user
+// PATCH /employees/me/visibility
+func (h *EmployeeHandler) UpdateMyVisibility(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		httputil.Error(w, errors.Unauthorized("missing user context"))
+		return
+	}
+
+	var req struct {
+		ShowInStaffList bool `json:"show_in_staff_list"`
+	}
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.Error(w, err)
+		return
+	}
+
+	if err := h.service.UpdateMyVisibility(r.Context(), userID, req.ShowInStaffList); err != nil {
+		httputil.Error(w, err)
+		return
+	}
+
+	httputil.JSON(w, http.StatusOK, map[string]bool{"show_in_staff_list": req.ShowInStaffList})
 }
 
 // ============================================================================

@@ -44,6 +44,22 @@ services:
     networks:
       - medflow-network
 
+  # Database migrations (runs once, then exits)
+  # All app services wait for this to complete before starting.
+  migrate:
+    build:
+      context: ..
+      dockerfile: deployments/docker/Dockerfile.migrate
+    container_name: medflow-migrate
+    environment:
+      - DATABASE_URL=postgres://medflow:${DB_PASSWORD:-devpassword}@postgres:5432/medflow?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - medflow-network
+    restart: "no"
+
   # Auth Service
   auth-service:
     build:
@@ -65,8 +81,8 @@ services:
     ports:
       - "8081:8081"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
     networks:
@@ -104,8 +120,8 @@ services:
     ports:
       - "8082:8082"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
     networks:
@@ -191,8 +207,8 @@ services:
     ports:
       - "8083:8083"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
       vision-service:
@@ -232,8 +248,8 @@ services:
     ports:
       - "8084:8084"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
     networks:

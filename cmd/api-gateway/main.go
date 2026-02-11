@@ -146,6 +146,8 @@ func main() {
 				r.Route("/employees", func(r chi.Router) {
 					r.Get("/", proxy.ForwardToStaff)
 					r.Post("/", proxy.ForwardToStaff)
+					r.Get("/me", proxy.ForwardToStaff)
+					r.Patch("/me/visibility", proxy.ForwardToStaff)
 					r.Get("/{id}", proxy.ForwardToStaff)
 					r.Put("/{id}", proxy.ForwardToStaff)
 					r.Delete("/{id}", proxy.ForwardToStaff)

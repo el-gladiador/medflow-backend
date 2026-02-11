@@ -180,6 +180,8 @@ func main() {
 		r.Route("/employees", func(r chi.Router) {
 			r.Get("/", employeeHandler.List)
 			r.Post("/", employeeHandler.Create)
+			r.Get("/me", employeeHandler.GetMe)
+			r.Patch("/me/visibility", employeeHandler.UpdateMyVisibility)
 			r.Get("/{id}", employeeHandler.Get)
 			r.Put("/{id}", employeeHandler.Update)
 			r.Delete("/{id}", employeeHandler.Delete)

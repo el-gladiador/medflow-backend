@@ -131,6 +131,16 @@ migrate-force-%: ## Force migration version (e.g., make migrate-force-8)
 	@echo "Forcing migration version to $*..."
 	@migrate -path migrations/supabase -database "$(MIGRATE_DATABASE_URL)" force $*
 
+migrate-build: ## Build migration Docker image locally
+	@echo "Building migration image..."
+	@docker build -t medflow-migrate -f deployments/docker/Dockerfile.migrate .
+
+migrate-docker: ## Run migrations via Docker against local postgres
+	@echo "Running migrations via Docker..."
+	@docker run --rm --network medflow-backend_medflow-network \
+		-e DATABASE_URL="postgres://$(DB_MIGRATE_USER):$(DB_PASSWORD)@medflow-db:5432/$(DB_NAME)?sslmode=$(DB_SSL_MODE)" \
+		medflow-migrate
+
 ## Tenant Management (RLS-based)
 ## Tenants are managed via INSERT into public.tenants, not schema creation.
 ## Works with both local Docker DB and remote Supabase DB.
