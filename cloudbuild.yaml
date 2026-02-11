@@ -107,7 +107,10 @@ steps:
   # ============================================================
   - id: migrate
     name: gcr.io/cloud-builders/docker
-    args: [run, --rm, -e, 'DATABASE_URL=$$DATABASE_URL', medflow-migrate]
+    entrypoint: bash
+    args:
+      - -c
+      - 'docker run --rm -e "DATABASE_URL=$$DATABASE_URL" medflow-migrate'
     secretEnv: [DATABASE_URL]
     waitFor: [build-migrate]
 
