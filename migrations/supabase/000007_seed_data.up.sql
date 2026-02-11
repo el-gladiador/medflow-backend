@@ -1,5 +1,6 @@
 -- MedFlow RLS Multi-Tenancy: Seed Data
 -- Seeds two demo tenants with admin users for local development
+-- Runs as superuser 'medflow' which bypasses RLS
 
 -- ============================================================================
 -- SEED TENANTS
@@ -14,21 +15,121 @@ ON CONFLICT (slug) DO NOTHING;
 -- SEED DEFAULT ROLES (per tenant)
 -- ============================================================================
 
--- Roles for test-practice
+-- Roles for test-practice (fixed IDs so we can reference them for user_roles)
 INSERT INTO users.roles (id, tenant_id, name, display_name, display_name_de, description, is_system, is_default, is_manager, can_receive_delegation, level, permissions)
 VALUES
-    (gen_random_uuid(), 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'admin', 'Administrator', 'Administrator', 'Full access to all features', TRUE, FALSE, TRUE, FALSE, 100, '["*"]'::jsonb),
-    (gen_random_uuid(), 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'manager', 'Manager', 'Manager', 'Manage staff, inventory, and reports', TRUE, FALSE, TRUE, TRUE, 50, '["staff.*", "inventory.*", "reports.*", "users.read"]'::jsonb),
-    (gen_random_uuid(), 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'staff', 'Staff Member', 'Mitarbeiter', 'Basic access for daily operations', TRUE, TRUE, FALSE, FALSE, 10, '["inventory.read", "inventory.adjust", "profile.*"]'::jsonb)
+    ('a1a00001-0000-0000-0000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'admin', 'Administrator', 'Administrator', 'Full access to all features', TRUE, FALSE, TRUE, FALSE, 100, '["*"]'::jsonb),
+    ('a1a00001-0000-0000-0000-000000000002', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'manager', 'Manager', 'Manager', 'Manage staff, inventory, and reports', TRUE, FALSE, TRUE, TRUE, 50, '["staff.*", "inventory.*", "reports.*", "users.read"]'::jsonb),
+    ('a1a00001-0000-0000-0000-000000000003', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'staff', 'Staff Member', 'Mitarbeiter', 'Basic access for daily operations', TRUE, TRUE, FALSE, FALSE, 10, '["inventory.read", "inventory.adjust", "profile.*"]'::jsonb)
 ON CONFLICT (tenant_id, name) DO NOTHING;
 
--- Roles for demo-clinic
+-- Roles for demo-clinic (fixed IDs)
 INSERT INTO users.roles (id, tenant_id, name, display_name, display_name_de, description, is_system, is_default, is_manager, can_receive_delegation, level, permissions)
 VALUES
-    (gen_random_uuid(), 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'admin', 'Administrator', 'Administrator', 'Full access to all features', TRUE, FALSE, TRUE, FALSE, 100, '["*"]'::jsonb),
-    (gen_random_uuid(), 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'manager', 'Manager', 'Manager', 'Manage staff, inventory, and reports', TRUE, FALSE, TRUE, TRUE, 50, '["staff.*", "inventory.*", "reports.*", "users.read"]'::jsonb),
-    (gen_random_uuid(), 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'staff', 'Staff Member', 'Mitarbeiter', 'Basic access for daily operations', TRUE, TRUE, FALSE, FALSE, 10, '["inventory.read", "inventory.adjust", "profile.*"]'::jsonb)
+    ('b2b00002-0000-0000-0000-000000000001', 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'admin', 'Administrator', 'Administrator', 'Full access to all features', TRUE, FALSE, TRUE, FALSE, 100, '["*"]'::jsonb),
+    ('b2b00002-0000-0000-0000-000000000002', 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'manager', 'Manager', 'Manager', 'Manage staff, inventory, and reports', TRUE, FALSE, TRUE, TRUE, 50, '["staff.*", "inventory.*", "reports.*", "users.read"]'::jsonb),
+    ('b2b00002-0000-0000-0000-000000000003', 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'staff', 'Staff Member', 'Mitarbeiter', 'Basic access for daily operations', TRUE, TRUE, FALSE, FALSE, 10, '["inventory.read", "inventory.adjust", "profile.*"]'::jsonb)
 ON CONFLICT (tenant_id, name) DO NOTHING;
+
+-- ============================================================================
+-- SEED ADMIN USERS (per tenant)
+-- Password for both: Admin123!
+-- ============================================================================
+
+-- Admin user for test-practice
+INSERT INTO users.users (id, tenant_id, email, first_name, last_name, password_hash, email_verified_at, status)
+VALUES (
+    'a1000001-0000-0000-0000-000000000001',
+    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+    'admin@praxis-mueller.de',
+    'Max',
+    'Müller',
+    '$2a$10$0epFj2hIu615UrRCnVtWlum8DmA0mR3xNREU3CTM1Rq1PaM8.psWe',
+    NOW(),
+    'active'
+) ON CONFLICT (tenant_id, email) DO NOTHING;
+
+-- Admin user for demo-clinic
+INSERT INTO users.users (id, tenant_id, email, first_name, last_name, password_hash, email_verified_at, status)
+VALUES (
+    'a2000002-0000-0000-0000-000000000001',
+    'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22',
+    'admin@praxis-park.de',
+    'Lisa',
+    'Schmidt',
+    '$2a$10$kjLMnnj8ajfFnDKEJ56ZYuJnyE.Tegla23ZlwWO7gUIrw2Tqr1HZS',
+    NOW(),
+    'active'
+) ON CONFLICT (tenant_id, email) DO NOTHING;
+
+-- ============================================================================
+-- SEED USER-TENANT LOOKUP (O(1) login resolution)
+-- ============================================================================
+INSERT INTO public.user_tenant_lookup (email, user_id, tenant_id, tenant_slug)
+VALUES
+    ('admin@praxis-mueller.de', 'a1000001-0000-0000-0000-000000000001', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'test-practice'),
+    ('admin@praxis-park.de', 'a2000002-0000-0000-0000-000000000001', 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'demo-clinic')
+ON CONFLICT (email) DO NOTHING;
+
+-- ============================================================================
+-- SEED USER ROLE ASSIGNMENTS (use subquery to reference roles by name)
+-- ============================================================================
+INSERT INTO users.user_roles (tenant_id, user_id, role_id)
+SELECT 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'a1000001-0000-0000-0000-000000000001', id
+FROM users.roles WHERE tenant_id = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' AND name = 'admin'
+ON CONFLICT (tenant_id, user_id, role_id) DO NOTHING;
+
+INSERT INTO users.user_roles (tenant_id, user_id, role_id)
+SELECT 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'a2000002-0000-0000-0000-000000000001', id
+FROM users.roles WHERE tenant_id = 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22' AND name = 'admin'
+ON CONFLICT (tenant_id, user_id, role_id) DO NOTHING;
+
+-- ============================================================================
+-- SEED ADMIN EMPLOYEE RECORDS (staff.employees)
+-- Admin users need employee records to appear in the staff management list.
+-- ============================================================================
+
+-- Employee record for test-practice admin (Max Müller)
+INSERT INTO staff.employees (
+    id, tenant_id, user_id, first_name, last_name,
+    email, employee_number, job_title, department,
+    employment_type, hire_date, status
+)
+VALUES (
+    'e1000001-0000-0000-0000-000000000001',
+    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+    'a1000001-0000-0000-0000-000000000001',
+    'Max',
+    'Müller',
+    'admin@praxis-mueller.de',
+    'EMP-001',
+    'Praxisinhaber',
+    'Verwaltung',
+    'full_time',
+    '2024-01-01',
+    'active'
+) ON CONFLICT DO NOTHING;
+
+-- Employee record for demo-clinic admin (Lisa Schmidt)
+INSERT INTO staff.employees (
+    id, tenant_id, user_id, first_name, last_name,
+    email, employee_number, job_title, department,
+    employment_type, hire_date, status
+)
+VALUES (
+    'e2000002-0000-0000-0000-000000000001',
+    'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22',
+    'a2000002-0000-0000-0000-000000000001',
+    'Lisa',
+    'Schmidt',
+    'admin@praxis-park.de',
+    'EMP-001',
+    'Praxisinhaberin',
+    'Verwaltung',
+    'full_time',
+    '2024-01-01',
+    'active'
+) ON CONFLICT DO NOTHING;
 
 -- ============================================================================
 -- SEED COMPLIANCE SETTINGS (per tenant)
