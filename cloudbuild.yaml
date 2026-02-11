@@ -13,6 +13,8 @@ substitutions:
   _REGION: europe-west1
   _REPOSITORY: medflow
 
+timeout: 1800s # 30 minutes
+
 options:
   logging: CLOUD_LOGGING_ONLY
 
@@ -91,28 +93,23 @@ steps:
       - .
     waitFor: ['-']
 
-  - id: build-migrate
-    name: gcr.io/cloud-builders/docker
-    args:
-      - build
-      - -t
-      - medflow-migrate
-      - -f
-      - deployments/docker/Dockerfile.migrate
-      - .
-    waitFor: ['-']
-
   # ============================================================
   # Step 2: Run database migrations (must succeed before deploys)
+  # Uses golang-migrate directly — requires pooler URL (IPv4) in
+  # Secret Manager since Cloud Build lacks IPv6 support.
   # ============================================================
   - id: migrate
-    name: gcr.io/cloud-builders/docker
-    entrypoint: bash
+    name: alpine:3.19
+    entrypoint: sh
     args:
       - -c
-      - 'docker run --rm -e "DATABASE_URL=$$DATABASE_URL" medflow-migrate'
+      - |
+        set -e
+        apk add --no-cache curl ca-certificates
+        curl -fsSL "https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-amd64.tar.gz" | tar -xz -C /usr/local/bin/ migrate
+        migrate -path migrations/supabase -database "$$DATABASE_URL" up
     secretEnv: [DATABASE_URL]
-    waitFor: [build-migrate]
+    waitFor: ['-']
 
   # ============================================================
   # Step 3: Push all images (after respective builds)
