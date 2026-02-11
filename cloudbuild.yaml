@@ -131,7 +131,6 @@ steps:
       - --cpu=1
       - --min-instances=0
       - --max-instances=3
-      - --set-env-vars=MEDFLOW_SERVER_ENVIRONMENT=staging
     waitFor: [push-gateway]
 
   - id: deploy-auth
@@ -143,12 +142,11 @@ steps:
       - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/auth-service:${SHORT_SHA}
       - --region=${_REGION}
       - --platform=managed
-      - --no-allow-unauthenticated
+      - --allow-unauthenticated
       - --memory=256Mi
       - --cpu=1
       - --min-instances=0
       - --max-instances=3
-      - --set-env-vars=MEDFLOW_SERVER_ENVIRONMENT=staging
     waitFor: [push-auth]
 
   - id: deploy-user
@@ -160,12 +158,11 @@ steps:
       - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/user-service:${SHORT_SHA}
       - --region=${_REGION}
       - --platform=managed
-      - --no-allow-unauthenticated
+      - --allow-unauthenticated
       - --memory=256Mi
       - --cpu=1
       - --min-instances=0
       - --max-instances=3
-      - --set-env-vars=MEDFLOW_SERVER_ENVIRONMENT=staging
     waitFor: [push-user]
 
   - id: deploy-staff
@@ -177,12 +174,11 @@ steps:
       - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/staff-service:${SHORT_SHA}
       - --region=${_REGION}
       - --platform=managed
-      - --no-allow-unauthenticated
+      - --allow-unauthenticated
       - --memory=256Mi
       - --cpu=1
       - --min-instances=0
       - --max-instances=3
-      - --set-env-vars=MEDFLOW_SERVER_ENVIRONMENT=staging
     waitFor: [push-staff]
 
   - id: deploy-inventory
@@ -194,12 +190,11 @@ steps:
       - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/inventory-service:${SHORT_SHA}
       - --region=${_REGION}
       - --platform=managed
-      - --no-allow-unauthenticated
+      - --allow-unauthenticated
       - --memory=256Mi
       - --cpu=1
       - --min-instances=0
       - --max-instances=3
-      - --set-env-vars=MEDFLOW_SERVER_ENVIRONMENT=staging
     waitFor: [push-inventory]
 
 # Push images to Artifact Registry
