@@ -21,20 +21,28 @@ type Employee struct {
 	EmployeeNumber *string `db:"employee_number" json:"employee_number,omitempty"`
 
 	// Personal info
-	FirstName   string     `db:"first_name" json:"first_name"`
-	LastName    string     `db:"last_name" json:"last_name"`
-	AvatarURL   *string    `db:"avatar_url" json:"avatar_url,omitempty"`
-	DateOfBirth *time.Time `db:"date_of_birth" json:"date_of_birth,omitempty"`
-	Gender      *string    `db:"gender" json:"gender,omitempty"`
-	Nationality *string    `db:"nationality" json:"nationality,omitempty"`
+	FirstName     string     `db:"first_name" json:"first_name"`
+	LastName      string     `db:"last_name" json:"last_name"`
+	AvatarURL     *string    `db:"avatar_url" json:"avatar_url,omitempty"`
+	DateOfBirth   *time.Time `db:"date_of_birth" json:"date_of_birth,omitempty"`
+	Gender        *string    `db:"gender" json:"gender,omitempty"`
+	Nationality   *string    `db:"nationality" json:"nationality,omitempty"`
+	BirthPlace    *string    `db:"birth_place" json:"birth_place,omitempty"`
+	MaritalStatus *string    `db:"marital_status" json:"marital_status,omitempty"` // single, married, divorced, widowed, civil_partnership
 
 	// Employment info
-	JobTitle       *string    `db:"job_title" json:"job_title,omitempty"`
-	Department     *string    `db:"department" json:"department,omitempty"`
-	EmploymentType string     `db:"employment_type" json:"employment_type"` // full_time, part_time, contractor, intern, temporary
-	HireDate       time.Time  `db:"hire_date" json:"hire_date"`
-	ProbationEnd   *time.Time `db:"probation_end_date" json:"probation_end_date,omitempty"`
+	JobTitle        *string    `db:"job_title" json:"job_title,omitempty"`
+	Department      *string    `db:"department" json:"department,omitempty"`
+	EmploymentType  string     `db:"employment_type" json:"employment_type"` // full_time, part_time, minijob, working_student, auxiliary, intern, contractor, temporary
+	ContractType    *string    `db:"contract_type" json:"contract_type,omitempty"` // permanent, fixed_term
+	HireDate        time.Time  `db:"hire_date" json:"hire_date"`
+	ProbationEnd    *time.Time `db:"probation_end_date" json:"probation_end_date,omitempty"`
 	TerminationDate *time.Time `db:"termination_date" json:"termination_date,omitempty"`
+
+	// Working time
+	WeeklyHours   *float64 `db:"weekly_hours" json:"weekly_hours,omitempty"`
+	VacationDays  *int     `db:"vacation_days" json:"vacation_days,omitempty"`
+	WorkTimeModel *string  `db:"work_time_model" json:"work_time_model,omitempty"` // fixed, flex, trust, shift
 
 	// Status and metadata
 	Status         string `db:"status" json:"status"` // active, on_leave, suspended, terminated, pending
@@ -46,7 +54,7 @@ type Employee struct {
 	CreatedBy *string    `db:"created_by" json:"created_by,omitempty"`
 	UpdatedBy *string    `db:"updated_by" json:"updated_by,omitempty"`
 
-	// Transient fields for API convenience (not stored in employees table)
+	// Contact info (stored in employees table)
 	Email  *string `db:"email" json:"email,omitempty"`
 	Phone  *string `db:"phone" json:"phone,omitempty"`
 	Mobile *string `db:"mobile" json:"mobile,omitempty"`
@@ -168,20 +176,26 @@ func (r *EmployeeRepository) Create(ctx context.Context, emp *Employee) error {
 		query := `
 			INSERT INTO employees (
 				id, tenant_id, user_id, employee_number, first_name, last_name, avatar_url,
-				date_of_birth, gender, nationality,
-				job_title, department, employment_type, hire_date,
-				probation_end_date, termination_date, status, show_in_staff_list, notes,
+				date_of_birth, gender, nationality, birth_place, marital_status,
+				job_title, department, employment_type, contract_type, hire_date,
+				probation_end_date, termination_date,
+				weekly_hours, vacation_days, work_time_model,
+				status, show_in_staff_list, notes,
 				email, phone, mobile, created_by
 			) VALUES (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+				$13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
+				$23, $24, $25, $26, $27, $28, $29
 			) RETURNING created_at, updated_at
 		`
 
 		err := r.db.QueryRowxContext(ctx, query,
 			emp.ID, tenantID, emp.UserID, emp.EmployeeNumber, emp.FirstName, emp.LastName, emp.AvatarURL,
-			emp.DateOfBirth, emp.Gender, emp.Nationality,
-			emp.JobTitle, emp.Department, emp.EmploymentType, emp.HireDate,
-			emp.ProbationEnd, emp.TerminationDate, emp.Status, emp.ShowInStaffList, emp.Notes,
+			emp.DateOfBirth, emp.Gender, emp.Nationality, emp.BirthPlace, emp.MaritalStatus,
+			emp.JobTitle, emp.Department, emp.EmploymentType, emp.ContractType, emp.HireDate,
+			emp.ProbationEnd, emp.TerminationDate,
+			emp.WeeklyHours, emp.VacationDays, emp.WorkTimeModel,
+			emp.Status, emp.ShowInStaffList, emp.Notes,
 			emp.Email, emp.Phone, emp.Mobile, emp.CreatedBy,
 		).Scan(&emp.CreatedAt, &emp.UpdatedAt)
 		if err != nil {
@@ -209,9 +223,11 @@ func (r *EmployeeRepository) GetByID(ctx context.Context, id string) (*Employee,
 	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, user_id, employee_number, first_name, last_name, avatar_url,
-			       date_of_birth, gender, nationality,
-			       job_title, department, employment_type, hire_date,
-			       probation_end_date, termination_date, status, show_in_staff_list, notes,
+			       date_of_birth, gender, nationality, birth_place, marital_status,
+			       job_title, department, employment_type, contract_type, hire_date,
+			       probation_end_date, termination_date,
+			       weekly_hours, vacation_days, work_time_model,
+			       status, show_in_staff_list, notes,
 			       email, phone, mobile, created_by, updated_by,
 			       created_at, updated_at
 			FROM employees
@@ -246,9 +262,11 @@ func (r *EmployeeRepository) GetByUserID(ctx context.Context, userID string) (*E
 	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, user_id, employee_number, first_name, last_name, avatar_url,
-			       date_of_birth, gender, nationality,
-			       job_title, department, employment_type, hire_date,
-			       probation_end_date, termination_date, status, show_in_staff_list, notes,
+			       date_of_birth, gender, nationality, birth_place, marital_status,
+			       job_title, department, employment_type, contract_type, hire_date,
+			       probation_end_date, termination_date,
+			       weekly_hours, vacation_days, work_time_model,
+			       status, show_in_staff_list, notes,
 			       email, phone, mobile, created_by, updated_by,
 			       created_at, updated_at
 			FROM employees
@@ -292,9 +310,11 @@ func (r *EmployeeRepository) List(ctx context.Context, page, perPage int) ([]*Em
 		offset := (page - 1) * perPage
 		query := `
 			SELECT id, user_id, employee_number, first_name, last_name, avatar_url,
-			       date_of_birth, gender, nationality,
-			       job_title, department, employment_type, hire_date,
-			       probation_end_date, termination_date, status, show_in_staff_list, notes,
+			       date_of_birth, gender, nationality, birth_place, marital_status,
+			       job_title, department, employment_type, contract_type, hire_date,
+			       probation_end_date, termination_date,
+			       weekly_hours, vacation_days, work_time_model,
+			       status, show_in_staff_list, notes,
 			       email, phone, mobile, created_by, updated_by,
 			       created_at, updated_at
 			FROM employees
@@ -327,19 +347,23 @@ func (r *EmployeeRepository) Update(ctx context.Context, emp *Employee) error {
 		query := `
 			UPDATE employees SET
 				user_id = $2, employee_number = $3, first_name = $4, last_name = $5, avatar_url = $6,
-				date_of_birth = $7, gender = $8, nationality = $9,
-				job_title = $10, department = $11, employment_type = $12, hire_date = $13,
-				probation_end_date = $14, termination_date = $15, status = $16, show_in_staff_list = $17, notes = $18,
-				email = $19, phone = $20, mobile = $21, updated_by = $22,
+				date_of_birth = $7, gender = $8, nationality = $9, birth_place = $10, marital_status = $11,
+				job_title = $12, department = $13, employment_type = $14, contract_type = $15, hire_date = $16,
+				probation_end_date = $17, termination_date = $18,
+				weekly_hours = $19, vacation_days = $20, work_time_model = $21,
+				status = $22, show_in_staff_list = $23, notes = $24,
+				email = $25, phone = $26, mobile = $27, updated_by = $28,
 				updated_at = NOW()
 			WHERE id = $1 AND deleted_at IS NULL
 		`
 
 		result, err := r.db.ExecContext(ctx, query,
 			emp.ID, emp.UserID, emp.EmployeeNumber, emp.FirstName, emp.LastName, emp.AvatarURL,
-			emp.DateOfBirth, emp.Gender, emp.Nationality,
-			emp.JobTitle, emp.Department, emp.EmploymentType, emp.HireDate,
-			emp.ProbationEnd, emp.TerminationDate, emp.Status, emp.ShowInStaffList, emp.Notes,
+			emp.DateOfBirth, emp.Gender, emp.Nationality, emp.BirthPlace, emp.MaritalStatus,
+			emp.JobTitle, emp.Department, emp.EmploymentType, emp.ContractType, emp.HireDate,
+			emp.ProbationEnd, emp.TerminationDate,
+			emp.WeeklyHours, emp.VacationDays, emp.WorkTimeModel,
+			emp.Status, emp.ShowInStaffList, emp.Notes,
 			emp.Email, emp.Phone, emp.Mobile, emp.UpdatedBy,
 		)
 		if err != nil {

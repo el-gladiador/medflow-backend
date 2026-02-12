@@ -433,7 +433,7 @@ func TestTimeTracking_CreateCorrection(t *testing.T) {
 
 	// Create a correction record
 	correctedClockIn := entry.ClockIn.Add(-15 * time.Minute)
-	correctorID := "manager-uuid-123"
+	correctorID := "00000000-0000-0000-0000-000000000099"
 	corr := &repository.TimeCorrection{
 		EmployeeID:       employeeID,
 		TimeEntryID:      &entry.ID,

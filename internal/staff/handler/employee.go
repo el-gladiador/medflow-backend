@@ -82,9 +82,12 @@ type EmployeeCredentials struct {
 }
 
 // CreateEmployeeRequest is the request structure for creating an employee
+// Supports optional sub-entities (address, emergency_contact) for atomic creation
 type CreateEmployeeRequest struct {
-	Employee    repository.Employee  `json:"employee"`
-	Credentials *EmployeeCredentials `json:"credentials,omitempty"`
+	Employee         repository.Employee         `json:"employee"`
+	Credentials      *EmployeeCredentials        `json:"credentials,omitempty"`
+	Address          *repository.EmployeeAddress  `json:"address,omitempty"`
+	EmergencyContact *repository.EmployeeContact  `json:"emergency_contact,omitempty"`
 }
 
 // Create creates a new employee
@@ -168,9 +171,33 @@ func (h *EmployeeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save optional sub-entities after employee creation
+	if req.Address != nil {
+		req.Address.EmployeeID = req.Employee.ID
+		req.Address.IsPrimary = true
+		if err := h.service.SaveAddress(r.Context(), req.Address); err != nil {
+			h.logger.Error().Err(err).Str("employee_id", req.Employee.ID).Msg("failed to save address for new employee")
+			// Non-fatal: employee was created, address can be added later
+		}
+	}
+
+	if req.EmergencyContact != nil {
+		req.EmergencyContact.EmployeeID = req.Employee.ID
+		req.EmergencyContact.IsPrimary = true
+		if req.EmergencyContact.ContactType == "" {
+			req.EmergencyContact.ContactType = "emergency"
+		}
+		if err := h.service.SaveContact(r.Context(), req.EmergencyContact); err != nil {
+			h.logger.Error().Err(err).Str("employee_id", req.Employee.ID).Msg("failed to save emergency contact for new employee")
+			// Non-fatal: employee was created, contact can be added later
+		}
+	}
+
 	h.logger.Info().
 		Str("employee_id", req.Employee.ID).
 		Bool("has_user_account", userID != nil).
+		Bool("has_address", req.Address != nil).
+		Bool("has_emergency_contact", req.EmergencyContact != nil).
 		Msg("employee created successfully")
 
 	httputil.Created(w, req.Employee)
@@ -232,11 +259,13 @@ func (h *EmployeeHandler) UpdatePersonal(w http.ResponseWriter, r *http.Request)
 
 	// Decode and merge personal info
 	var req struct {
-		FirstName   string  `json:"first_name"`
-		LastName    string  `json:"last_name"`
-		AvatarURL   *string `json:"avatar_url"`
-		Gender      *string `json:"gender"`
-		Nationality *string `json:"nationality"`
+		FirstName     string  `json:"first_name"`
+		LastName      string  `json:"last_name"`
+		AvatarURL     *string `json:"avatar_url"`
+		Gender        *string `json:"gender"`
+		Nationality   *string `json:"nationality"`
+		BirthPlace    *string `json:"birth_place"`
+		MaritalStatus *string `json:"marital_status"`
 	}
 	if err := httputil.DecodeJSON(r, &req); err != nil {
 		httputil.Error(w, err)
@@ -257,6 +286,12 @@ func (h *EmployeeHandler) UpdatePersonal(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Nationality != nil {
 		emp.Nationality = req.Nationality
+	}
+	if req.BirthPlace != nil {
+		emp.BirthPlace = req.BirthPlace
+	}
+	if req.MaritalStatus != nil {
+		emp.MaritalStatus = req.MaritalStatus
 	}
 
 	if err := h.service.Update(r.Context(), emp); err != nil {

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -329,27 +330,27 @@ func (r *ShiftRepository) ListAssignments(ctx context.Context, params ShiftListP
 		argNum := 1
 
 		if params.EmployeeID != nil {
-			whereClause += " AND sa.employee_id = $" + string(rune('0'+argNum))
+			whereClause += fmt.Sprintf(" AND sa.employee_id = $%d", argNum)
 			args = append(args, *params.EmployeeID)
 			argNum++
 		}
 		if params.StartDate != nil {
-			whereClause += " AND sa.shift_date >= $" + string(rune('0'+argNum))
+			whereClause += fmt.Sprintf(" AND sa.shift_date >= $%d", argNum)
 			args = append(args, *params.StartDate)
 			argNum++
 		}
 		if params.EndDate != nil {
-			whereClause += " AND sa.shift_date <= $" + string(rune('0'+argNum))
+			whereClause += fmt.Sprintf(" AND sa.shift_date <= $%d", argNum)
 			args = append(args, *params.EndDate)
 			argNum++
 		}
 		if params.Status != nil {
-			whereClause += " AND sa.status = $" + string(rune('0'+argNum))
+			whereClause += fmt.Sprintf(" AND sa.status = $%d", argNum)
 			args = append(args, *params.Status)
 			argNum++
 		}
 		if params.ShiftType != nil {
-			whereClause += " AND sa.shift_type = $" + string(rune('0'+argNum))
+			whereClause += fmt.Sprintf(" AND sa.shift_type = $%d", argNum)
 			args = append(args, *params.ShiftType)
 			argNum++
 		}
@@ -379,9 +380,9 @@ func (r *ShiftRepository) ListAssignments(ctx context.Context, params ShiftListP
 			FROM shift_assignments sa
 			LEFT JOIN employees e ON sa.employee_id = e.id
 			LEFT JOIN shift_templates st ON sa.shift_template_id = st.id
-		` + whereClause + `
+		` + whereClause + fmt.Sprintf(`
 			ORDER BY sa.shift_date, sa.start_time
-			LIMIT $` + string(rune('0'+argNum)) + ` OFFSET $` + string(rune('0'+argNum+1))
+			LIMIT $%d OFFSET $%d`, argNum, argNum+1)
 
 		args = append(args, params.PerPage, offset)
 		return r.db.SelectContext(ctx, &shifts, query, args...)

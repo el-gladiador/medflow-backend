@@ -127,7 +127,7 @@ func (c *PostgresContainer) CreateAppRole(ctx context.Context, db *sqlx.DB) erro
 		$$;
 
 		-- Grant permissions on all schemas
-		GRANT CONNECT ON DATABASE current_database() TO medflow_app;
+		GRANT CONNECT ON DATABASE medflow_test TO medflow_app;
 		GRANT USAGE ON SCHEMA public TO medflow_app;
 		GRANT USAGE ON SCHEMA users TO medflow_app;
 		GRANT USAGE ON SCHEMA staff TO medflow_app;
@@ -397,11 +397,13 @@ var staffSchemaSQL = `
 		probation_end_date DATE,
 		termination_date DATE,
 		status VARCHAR(20) DEFAULT 'active',
+		show_in_staff_list BOOLEAN DEFAULT true,
 		notes TEXT,
 		email VARCHAR(255),
 		phone VARCHAR(50),
 		mobile VARCHAR(50),
 		created_by UUID,
+		updated_by UUID,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		deleted_at TIMESTAMPTZ,
@@ -413,14 +415,40 @@ var staffSchemaSQL = `
 		FOR ALL USING (tenant_id = current_setting('app.current_tenant')::uuid)
 		WITH CHECK (tenant_id = current_setting('app.current_tenant')::uuid);
 
+	CREATE TABLE IF NOT EXISTS staff.employee_addresses (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		tenant_id UUID NOT NULL REFERENCES public.tenants(id),
+		employee_id UUID NOT NULL REFERENCES staff.employees(id) ON DELETE CASCADE,
+		address_type VARCHAR(50) NOT NULL DEFAULT 'home',
+		street VARCHAR(255) NOT NULL,
+		house_number VARCHAR(20),
+		address_line2 VARCHAR(255),
+		postal_code VARCHAR(20) NOT NULL,
+		city VARCHAR(100) NOT NULL,
+		state VARCHAR(100),
+		country VARCHAR(100) NOT NULL DEFAULT 'Germany',
+		is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+	ALTER TABLE staff.employee_addresses ENABLE ROW LEVEL SECURITY;
+	DROP POLICY IF EXISTS tenant_isolation ON staff.employee_addresses;
+	CREATE POLICY tenant_isolation ON staff.employee_addresses
+		FOR ALL USING (tenant_id = current_setting('app.current_tenant')::uuid)
+		WITH CHECK (tenant_id = current_setting('app.current_tenant')::uuid);
+
 	CREATE TABLE IF NOT EXISTS staff.time_entries (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		tenant_id UUID NOT NULL REFERENCES public.tenants(id),
 		employee_id UUID NOT NULL REFERENCES staff.employees(id),
+		entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
 		clock_in TIMESTAMPTZ NOT NULL,
 		clock_out TIMESTAMPTZ,
+		total_work_minutes INTEGER DEFAULT 0,
+		total_break_minutes INTEGER DEFAULT 0,
 		status VARCHAR(20) DEFAULT 'active',
 		entry_type VARCHAR(20) DEFAULT 'regular',
+		is_manual_entry BOOLEAN DEFAULT false,
 		notes TEXT,
 		created_by UUID,
 		updated_by UUID,
@@ -450,14 +478,40 @@ var staffSchemaSQL = `
 		FOR ALL USING (tenant_id = current_setting('app.current_tenant')::uuid)
 		WITH CHECK (tenant_id = current_setting('app.current_tenant')::uuid);
 
+	CREATE TABLE IF NOT EXISTS staff.time_corrections (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		tenant_id UUID NOT NULL REFERENCES public.tenants(id),
+		employee_id UUID NOT NULL REFERENCES staff.employees(id),
+		time_entry_id UUID REFERENCES staff.time_entries(id),
+		correction_date DATE NOT NULL DEFAULT CURRENT_DATE,
+		original_clock_in TIMESTAMPTZ,
+		original_clock_out TIMESTAMPTZ,
+		corrected_clock_in TIMESTAMPTZ,
+		corrected_clock_out TIMESTAMPTZ,
+		reason TEXT,
+		status VARCHAR(20) DEFAULT 'pending',
+		corrected_by UUID,
+		approved_by UUID,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		deleted_at TIMESTAMPTZ
+	);
+	ALTER TABLE staff.time_corrections ENABLE ROW LEVEL SECURITY;
+	DROP POLICY IF EXISTS tenant_isolation ON staff.time_corrections;
+	CREATE POLICY tenant_isolation ON staff.time_corrections
+		FOR ALL USING (tenant_id = current_setting('app.current_tenant')::uuid)
+		WITH CHECK (tenant_id = current_setting('app.current_tenant')::uuid);
+
 	CREATE TABLE IF NOT EXISTS staff.shift_templates (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		tenant_id UUID NOT NULL REFERENCES public.tenants(id),
 		name VARCHAR(100) NOT NULL,
+		description TEXT,
 		start_time TIME NOT NULL,
 		end_time TIME NOT NULL,
 		break_duration_minutes INTEGER DEFAULT 0,
-		color VARCHAR(7),
+		shift_type VARCHAR(50) DEFAULT 'regular',
+		color VARCHAR(20) DEFAULT '#22c55e',
 		is_active BOOLEAN DEFAULT true,
 		created_by UUID,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -486,6 +540,7 @@ var staffSchemaSQL = `
 		conflict_reason TEXT,
 		notes TEXT,
 		created_by UUID,
+		updated_by UUID,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		deleted_at TIMESTAMPTZ
