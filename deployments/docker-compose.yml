@@ -139,46 +139,20 @@ services:
         - action: rebuild
           path: ../go.mod
 
-  # Ollama (AI model server for document vision extraction)
-  ollama:
-    image: ollama/ollama:latest
-    container_name: medflow-ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama-data:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    networks:
-      - medflow-network
-
-  # Vision Service (Python - document extraction via Ollama)
-  vision-service:
+  # Vision Brain (CPU orchestrator — preprocessing, prompt selection, JSON parsing)
+  # No GPU locally — returns 503 for extraction requests (GPU_SERVICE_URL not set)
+  vision-brain:
     build:
-      context: ../services/vision-service
+      context: ../services/vision-brain
       dockerfile: Dockerfile
-    container_name: medflow-vision-service
+    container_name: medflow-vision-brain
     environment:
-      - OLLAMA_URL=http://ollama:11434
-      - OLLAMA_MODEL=moondream
-      - PORT=8090
+      - PORT=8091
+      # GPU_SERVICE_URL intentionally unset — no GPU available in local dev
     ports:
-      - "8090:8090"
-    depends_on:
-      ollama:
-        condition: service_healthy
+      - "8091:8091"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8091/health"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -203,15 +177,13 @@ services:
       - MEDFLOW_RABBITMQ_URL=amqp://medflow:${RABBITMQ_PASSWORD:-devpassword}@rabbitmq:5672/
       - MEDFLOW_JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
       - USER_SERVICE_URL=http://user-service:8082
-      - VISION_SERVICE_URL=http://vision-service:8090
+      - VISION_SERVICE_URL=http://vision-brain:8091
     ports:
       - "8083:8083"
     depends_on:
       migrate:
         condition: service_completed_successfully
       rabbitmq:
-        condition: service_healthy
-      vision-service:
         condition: service_healthy
     networks:
       - medflow-network
@@ -308,4 +280,3 @@ networks:
 volumes:
   rabbitmq-data:
   postgres-data:
-  ollama-data:

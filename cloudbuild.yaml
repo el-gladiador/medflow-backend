@@ -1,5 +1,5 @@
 # Cloud Build pipeline for MedFlow backend
-# Builds and deploys all 6 services to Cloud Run in parallel.
+# Builds and deploys all 7 services to Cloud Run in parallel.
 #
 # Trigger: push to main branch
 # Usage:  gcloud builds submit --config cloudbuild.yaml .
@@ -93,6 +93,34 @@ steps:
       - .
     waitFor: ['-']
 
+  - id: build-vision-brain
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-brain:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-brain:latest
+      - -f
+      - services/vision-brain/Dockerfile
+      - services/vision-brain
+    waitFor: ['-']
+
+  - id: build-vision-gpu
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg
+      - MODEL_ID=Qwen/Qwen3-VL-8B-Instruct
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-gpu:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-gpu:latest
+      - -f
+      - services/vision-gpu/Dockerfile
+      - services/vision-gpu
+    waitFor: ['-']
+
   # ============================================================
   # Step 2: Run database migrations (must succeed before deploys)
   # Uses golang-migrate directly — requires pooler URL (IPv4) in
@@ -138,6 +166,16 @@ steps:
     name: gcr.io/cloud-builders/docker
     args: [push, --all-tags, '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/inventory-service']
     waitFor: [build-inventory]
+
+  - id: push-vision-brain
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-brain']
+    waitFor: [build-vision-brain]
+
+  - id: push-vision-gpu
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-gpu']
+    waitFor: [build-vision-gpu]
 
   # ============================================================
   # Step 4: Deploy all to Cloud Run (after pushes AND migration)
@@ -222,6 +260,43 @@ steps:
       - --max-instances=3
     waitFor: [push-inventory, migrate]
 
+  - id: deploy-vision-brain
+    name: gcr.io/cloud-builders/gcloud
+    args:
+      - run
+      - deploy
+      - medflow-vision-brain
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-brain:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --no-allow-unauthenticated
+      - --memory=512Mi
+      - --cpu=1
+      - --concurrency=10
+      - --min-instances=1
+      - --max-instances=3
+      - --set-env-vars=GPU_SERVICE_URL=https://medflow-vision-gpu-xxxxx-ew.a.run.app
+    waitFor: [push-vision-brain, migrate]
+
+  - id: deploy-vision-gpu
+    name: gcr.io/cloud-builders/gcloud
+    args:
+      - run
+      - deploy
+      - medflow-vision-gpu
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-gpu:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --no-allow-unauthenticated
+      - --gpu=1
+      - --gpu-type=nvidia-l4
+      - --memory=16Gi
+      - --cpu=4
+      - --concurrency=1
+      - --min-instances=0
+      - --max-instances=2
+    waitFor: [push-vision-gpu]
+
 # Push images to Artifact Registry
 images:
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/api-gateway:${SHORT_SHA}
@@ -234,3 +309,7 @@ images:
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/staff-service:latest
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/inventory-service:${SHORT_SHA}
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/inventory-service:latest
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-brain:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-brain:latest
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-gpu:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-gpu:latest
