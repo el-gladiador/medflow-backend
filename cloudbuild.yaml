@@ -298,6 +298,9 @@ steps:
       - --min-instances=0
       - --max-instances=2
       - --execution-environment=gen2
+      - --no-gpu-zonal-redundancy
+      - --cpu-boost
+      - --timeout=300s
       - --add-volume=name=model-weights,type=cloud-storage,bucket=${PROJECT_ID}-vision-models,readonly=true
       - --add-volume-mount=volume=model-weights,mount-path=/model
       - --set-env-vars=MODEL_ID=/model/qwen3-vl-8b-instruct
