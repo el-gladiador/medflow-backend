@@ -110,8 +110,8 @@ steps:
     name: gcr.io/cloud-builders/docker
     args:
       - build
-      - --build-arg
-      - MODEL_ID=Qwen/Qwen3-VL-8B-Instruct
+      - --cache-from
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-gpu:latest
       - -t
       - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-gpu:${SHORT_SHA}
       - -t
@@ -297,6 +297,10 @@ steps:
       - --concurrency=1
       - --min-instances=0
       - --max-instances=2
+      - --execution-environment=gen2
+      - --add-volume=name=model-weights,type=cloud-storage,bucket=${PROJECT_ID}-vision-models,readonly=true
+      - --add-volume-mount=volume=model-weights,mount-path=/model
+      - --set-env-vars=MODEL_ID=/model/qwen3-vl-8b-instruct
     waitFor: [push-vision-gpu]
 
 # Push images to Artifact Registry

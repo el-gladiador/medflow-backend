@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     """GPU inference service settings, loaded from environment variables."""
 
     # Model (any vLLM-compatible vision model)
-    MODEL_ID: str = "Qwen/Qwen3-VL-8B-Instruct"
+    MODEL_ID: str = "/model/qwen3-vl-8b-instruct"
 
     # vLLM engine settings
     GPU_MEMORY_UTILIZATION: float = 0.85

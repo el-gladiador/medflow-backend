@@ -1,5 +1,5 @@
 .PHONY: help build run test clean docker-up docker-down migrate-up migrate-down \
-	cloud-setup cloud-build-all deploy-all cloud-urls cloud-submit-all
+	cloud-setup cloud-build-all deploy-all cloud-urls cloud-submit-all model-upload
 
 # Go parameters
 GOCMD=go
@@ -356,3 +356,8 @@ cloud-submit: ## Submit the full Cloud Build pipeline (builds + deploys all serv
 		--config=cloudbuild.yaml \
 		--substitutions=_REGION=$(GCP_REGION),_REPOSITORY=$(GCP_REPOSITORY) \
 		.
+
+## Vision Model Management
+
+model-upload: ## One-time: upload vision model weights to GCS for FUSE mount
+	@bash scripts/upload-model.sh
