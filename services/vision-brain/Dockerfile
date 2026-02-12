@@ -13,7 +13,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+ENV PORT=8091
 EXPOSE 8091
 
 # 2 workers — CPU-only, no GPU contention
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8091", "--workers", "2"]
+# Cloud Run sets PORT env var; use shell form so $PORT is expanded at runtime
+CMD uvicorn main:app --host 0.0.0.0 --port $PORT --workers 2

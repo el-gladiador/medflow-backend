@@ -270,6 +270,7 @@ steps:
       - --region=${_REGION}
       - --platform=managed
       - --no-allow-unauthenticated
+      - --port=8091
       - --memory=512Mi
       - --cpu=1
       - --concurrency=10
@@ -288,6 +289,7 @@ steps:
       - --region=${_REGION}
       - --platform=managed
       - --no-allow-unauthenticated
+      - --port=8090
       - --gpu=1
       - --gpu-type=nvidia-l4
       - --memory=16Gi

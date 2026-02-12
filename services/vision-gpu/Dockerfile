@@ -30,8 +30,10 @@ ENV HF_HUB_OFFLINE=1
 ENV TRANSFORMERS_OFFLINE=1
 ENV TMPDIR=/tmp
 ENV MODEL_ID=/model
+ENV PORT=8090
 
 EXPOSE 8090
 
 # Single worker — GPU inference is sequential
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8090", "--workers", "1"]
+# Cloud Run sets PORT env var; use shell form so $PORT is expanded at runtime
+CMD uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
