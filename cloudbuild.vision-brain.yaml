@@ -1,0 +1,55 @@
+# Cloud Build pipeline for vision-brain (Python orchestrator).
+# Standalone — no migrations, no shared Go build.
+#
+# Usage (manual):
+#   gcloud builds submit --config=cloudbuild.vision-brain.yaml .
+
+substitutions:
+  _REGION: europe-west1
+  _REPOSITORY: medflow
+
+timeout: 600s
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-brain:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-brain:latest
+      - -f
+      - services/vision-brain/Dockerfile
+      - services/vision-brain
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-brain']
+    waitFor: [build]
+
+  - id: deploy
+    name: gcr.io/cloud-builders/gcloud
+    args:
+      - run
+      - deploy
+      - medflow-vision-brain
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-brain:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --no-allow-unauthenticated
+      - --port=8091
+      - --memory=512Mi
+      - --cpu=1
+      - --concurrency=10
+      - --min-instances=1
+      - --max-instances=3
+      - --set-env-vars=GPU_SERVICE_URL=https://medflow-vision-gpu-xxxxx-ew.a.run.app
+    waitFor: [push]
+
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-brain:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-brain:latest

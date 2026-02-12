@@ -1,0 +1,81 @@
+# Parameterized Cloud Build pipeline for Go microservices.
+# Shared by all 5 Go service triggers — each trigger passes its own substitutions.
+#
+# Required substitutions (set by trigger):
+#   _SERVICE    - e.g. staff-service
+#   _DOCKERFILE - e.g. deployments/docker/Dockerfile.staff
+#
+# Usage (manual):
+#   gcloud builds submit --config=cloudbuild.go-service.yaml \
+#     --substitutions=_SERVICE=staff-service,_DOCKERFILE=deployments/docker/Dockerfile.staff .
+
+substitutions:
+  _SERVICE: ''
+  _DOCKERFILE: ''
+  _REGION: europe-west1
+  _REPOSITORY: medflow
+
+timeout: 600s
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/${PROJECT_ID}/secrets/medflow-migrate-database-url/versions/latest
+      env: DATABASE_URL
+
+steps:
+  # Build Docker image
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:latest
+      - -f
+      - ${_DOCKERFILE}
+      - .
+
+  # Run database migrations (idempotent — advisory locks prevent conflicts)
+  - id: migrate
+    name: alpine:3.19
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        set -e
+        apk add --no-cache curl ca-certificates
+        curl -fsSL "https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-amd64.tar.gz" | tar -xz -C /usr/local/bin/ migrate
+        migrate -path migrations/supabase -database "$$DATABASE_URL" up
+    secretEnv: [DATABASE_URL]
+    waitFor: ['-']
+
+  # Push image to Artifact Registry
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}']
+    waitFor: [build]
+
+  # Deploy to Cloud Run
+  - id: deploy
+    name: gcr.io/cloud-builders/gcloud
+    args:
+      - run
+      - deploy
+      - medflow-${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --memory=256Mi
+      - --cpu=1
+      - --min-instances=0
+      - --max-instances=3
+    waitFor: [push, migrate]
+
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:latest

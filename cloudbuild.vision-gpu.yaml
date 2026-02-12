@@ -1,0 +1,65 @@
+# Cloud Build pipeline for vision-gpu (GPU inference server).
+# Standalone — no migrations, uses cache-from for faster builds.
+#
+# Usage (manual):
+#   gcloud builds submit --config=cloudbuild.vision-gpu.yaml .
+
+substitutions:
+  _REGION: europe-west1
+  _REPOSITORY: medflow
+
+timeout: 1800s
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --cache-from
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-gpu:latest
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-gpu:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-gpu:latest
+      - -f
+      - services/vision-gpu/Dockerfile
+      - services/vision-gpu
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-gpu']
+    waitFor: [build]
+
+  - id: deploy
+    name: gcr.io/cloud-builders/gcloud
+    args:
+      - run
+      - deploy
+      - medflow-vision-gpu
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-gpu:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --no-allow-unauthenticated
+      - --port=8090
+      - --gpu=1
+      - --gpu-type=nvidia-l4
+      - --memory=16Gi
+      - --cpu=4
+      - --concurrency=1
+      - --min-instances=0
+      - --max-instances=2
+      - --execution-environment=gen2
+      - --no-gpu-zonal-redundancy
+      - --cpu-boost
+      - --timeout=300s
+      - --add-volume=name=model-weights,type=cloud-storage,bucket=${PROJECT_ID}-vision-models,readonly=true
+      - --add-volume-mount=volume=model-weights,mount-path=/model
+      - --set-env-vars=MODEL_ID=/model/qwen3-vl-8b-instruct
+    waitFor: [push]
+
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-gpu:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/vision-gpu:latest

@@ -1,5 +1,6 @@
 .PHONY: help build run test clean docker-up docker-down migrate-up migrate-down \
-	cloud-setup cloud-build-all deploy-all cloud-urls cloud-submit-all model-upload
+	cloud-setup cloud-build-all deploy-all cloud-urls cloud-submit-all \
+	cloud-submit-go cloud-submit-vision-brain cloud-submit-vision-gpu model-upload
 
 # Go parameters
 GOCMD=go
@@ -350,12 +351,37 @@ cloud-urls: ## Print deployed Cloud Run service URLs
 		fi; \
 	done
 
-cloud-submit: ## Submit the full Cloud Build pipeline (builds + deploys all services)
-	@echo "Submitting Cloud Build pipeline..."
+cloud-submit-%: ## Submit a Go service pipeline (e.g., make cloud-submit-staff-service)
+	@echo "Submitting Cloud Build for $*..."
 	@gcloud builds submit \
-		--config=cloudbuild.yaml \
+		--config=cloudbuild.go-service.yaml \
+		--substitutions=_SERVICE=$*,_DOCKERFILE=$(call get_dockerfile,$*),_REGION=$(GCP_REGION),_REPOSITORY=$(GCP_REPOSITORY) \
+		.
+
+cloud-submit-vision-brain: ## Submit vision-brain pipeline
+	@echo "Submitting Cloud Build for vision-brain..."
+	@gcloud builds submit \
+		--config=cloudbuild.vision-brain.yaml \
 		--substitutions=_REGION=$(GCP_REGION),_REPOSITORY=$(GCP_REPOSITORY) \
 		.
+
+cloud-submit-vision-gpu: ## Submit vision-gpu pipeline
+	@echo "Submitting Cloud Build for vision-gpu..."
+	@gcloud builds submit \
+		--config=cloudbuild.vision-gpu.yaml \
+		--substitutions=_REGION=$(GCP_REGION),_REPOSITORY=$(GCP_REPOSITORY) \
+		.
+
+cloud-submit-go: ## Submit all 5 Go service pipelines
+	@for service in $(SERVICES); do \
+		echo "=== Submitting $$service ==="; \
+		$(MAKE) cloud-submit-$$service || exit 1; \
+	done
+
+cloud-submit-all: ## Submit all 7 service pipelines
+	@$(MAKE) cloud-submit-go
+	@$(MAKE) cloud-submit-vision-brain
+	@$(MAKE) cloud-submit-vision-gpu
 
 ## Vision Model Management
 
