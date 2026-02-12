@@ -55,6 +55,11 @@ steps:
       - --no-gpu-zonal-redundancy
       - --cpu-boost
       - --timeout=300s
+      - --startup-probe-http-get-path=/health
+      - --startup-probe-initial-delay=0s
+      - --startup-probe-timeout=5s
+      - --startup-probe-period=10s
+      - --startup-probe-failure-threshold=30
       - --add-volume=name=model-weights,type=cloud-storage,bucket=${PROJECT_ID}-vision-models,readonly=true
       - --add-volume-mount=volume=model-weights,mount-path=/model
       - --set-env-vars=MODEL_ID=/model/qwen3-vl-8b-instruct

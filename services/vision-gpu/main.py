@@ -6,6 +6,7 @@ This service only runs in production on GPU instances.
 
 import base64
 import logging
+import threading
 import time
 from contextlib import asynccontextmanager
 
@@ -24,16 +25,25 @@ logger = logging.getLogger(__name__)
 _model_ready = False
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Pre-load the vLLM engine at startup (triggers model loading)."""
+def _load_model():
+    """Load the vLLM engine in a background thread."""
     global _model_ready
     from engine import init_engine
 
+    try:
+        init_engine()
+        _model_ready = True
+        logger.info("GPU inference service ready")
+    except Exception:
+        logger.exception("Failed to load model")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start model loading in a background thread so the server binds immediately."""
     logger.info("Initializing vLLM engine (model=%s)...", settings.MODEL_ID)
-    init_engine()
-    _model_ready = True
-    logger.info("GPU inference service ready")
+    thread = threading.Thread(target=_load_model, daemon=True)
+    thread.start()
     yield
 
 
