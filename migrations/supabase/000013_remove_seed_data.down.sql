@@ -1,0 +1,2 @@
+-- No-op: seed data is managed by `make seed`, not by migrations.
+-- Run `make seed` to re-insert test tenants for local development.

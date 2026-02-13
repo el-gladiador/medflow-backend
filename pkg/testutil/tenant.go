@@ -94,8 +94,8 @@ func (tm *TenantManager) DropTenant(ctx context.Context, t *TestTenant) error {
 		schema string
 		tables []string
 	}{
-		{"inventory", []string{"inventory_alerts", "stock_adjustments", "inventory_batches", "inventory_items", "storage_shelves", "storage_cabinets", "storage_rooms", "user_cache"}},
-		{"staff", []string{"document_processing_audit", "time_correction_requests", "compliance_alerts", "compliance_violations", "compliance_settings", "arbzg_compliance_log", "time_corrections", "time_breaks", "time_entries", "vacation_balances", "absences", "shift_assignments", "shift_templates", "employee_documents", "employee_social_insurance", "employee_financials", "employee_contacts", "employee_addresses", "employees", "user_cache"}},
+		{"inventory", []string{"temperature_readings", "device_incidents", "device_trainings", "device_inspections", "item_documents", "hazardous_substance_details", "inventory_alerts", "stock_adjustments", "inventory_batches", "inventory_items", "storage_shelves", "storage_cabinets", "storage_rooms", "user_cache"}},
+		{"staff", []string{"document_processing_audit", "time_correction_requests", "compliance_alerts", "compliance_violations", "compliance_settings", "arbzg_compliance_log", "time_corrections", "time_breaks", "time_entries", "vacation_balances", "absences", "shift_assignments", "shift_templates", "employee_files", "employee_documents", "employee_social_insurance", "employee_financials", "employee_contacts", "employee_addresses", "employees", "user_cache"}},
 		{"users", []string{"audit_logs", "user_roles", "sessions", "roles", "users"}},
 	}
 

@@ -49,6 +49,13 @@ define run_psql
 		$(PSQL_REMOTE) -c $(1))
 endef
 
+# psql file dispatcher: docker exec for local, psql for remote
+define run_psql_file
+	$(if $(filter true,$(IS_LOCAL_DB)), \
+		docker exec -i medflow-db psql -U $(DB_MIGRATE_USER) -d $(DB_NAME) < $(1), \
+		$(PSQL_REMOTE) -f $(1))
+endef
+
 help: ## Display this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
@@ -196,6 +203,10 @@ dev-local: infra-up ## Start local Docker infrastructure and print service comma
 	@echo "Local infrastructure started (Docker PostgreSQL + RabbitMQ)."
 	@echo "Database: localhost:5432/medflow"
 	@echo ""
+	@echo "Setup commands:"
+	@echo "  make migrate-up       # Run schema migrations"
+	@echo "  make seed             # Insert test tenants (dev only)"
+	@echo ""
 	@echo "Run services with:"
 	@echo "  make run-api-gateway"
 	@echo "  make run-auth-service"
@@ -257,9 +268,17 @@ db-status: ## Show which database is currently targeted
 	@echo "  App:      $(DB_APP_USER)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)"
 	@echo "  Local DB: $(IS_LOCAL_DB)"
 
-seed: ## Seed the database with test data
-	@echo "Seeding database..."
-	@go run ./scripts/seed/main.go
+seed: ## Seed the database with test tenants (dev only, never run on production)
+	@echo "Seeding test tenants on $(DB_HOST)/$(DB_NAME)..."
+	@$(call run_psql_file,scripts/seed/seed.sql)
+	@echo "Seed data inserted. Test logins:"
+	@echo "  admin@praxis-mueller.de / Admin123!  (test-practice)"
+	@echo "  admin@praxis-park.de    / Admin123!  (demo-clinic)"
+
+unseed: ## Remove seed/test data from the database
+	@echo "Removing test tenants from $(DB_HOST)/$(DB_NAME)..."
+	@$(call run_psql_file,migrations/supabase/000013_remove_seed_data.up.sql)
+	@echo "Seed data removed."
 
 ## Code Quality
 

@@ -258,6 +258,9 @@ func main() {
 						r.Get("/{id}", proxy.ForwardToInventory)
 						r.Put("/{id}", proxy.ForwardToInventory)
 						r.Delete("/{id}", proxy.ForwardToInventory)
+						// Temperature monitoring
+						r.Post("/{id}/temperature", proxy.ForwardToInventory)
+						r.Get("/{id}/temperature", proxy.ForwardToInventory)
 					})
 					r.Route("/shelves", func(r chi.Router) {
 						r.Get("/", proxy.ForwardToInventory)
@@ -268,6 +271,9 @@ func main() {
 					})
 				})
 
+				// Temperature webhook
+				r.Post("/temperature/webhook", proxy.ForwardToInventory)
+
 				// Item routes
 				r.Route("/items", func(r chi.Router) {
 					r.Get("/", proxy.ForwardToInventory)
@@ -277,6 +283,28 @@ func main() {
 					r.Delete("/{id}", proxy.ForwardToInventory)
 					r.Get("/{id}/batches", proxy.ForwardToInventory)
 					r.Post("/{id}/batches", proxy.ForwardToInventory)
+					// Compliance: hazardous details
+					r.Get("/{id}/hazardous", proxy.ForwardToInventory)
+					r.Put("/{id}/hazardous", proxy.ForwardToInventory)
+					r.Delete("/{id}/hazardous", proxy.ForwardToInventory)
+					// Compliance: documents
+					r.Get("/{id}/documents", proxy.ForwardToInventory)
+					r.Post("/{id}/documents", proxy.ForwardToInventory)
+					// Device book (MPBetreibV §13)
+					r.Route("/{id}/device-book", func(r chi.Router) {
+						r.Get("/inspections", proxy.ForwardToInventory)
+						r.Post("/inspections", proxy.ForwardToInventory)
+						r.Put("/inspections/{inspId}", proxy.ForwardToInventory)
+						r.Delete("/inspections/{inspId}", proxy.ForwardToInventory)
+						r.Get("/trainings", proxy.ForwardToInventory)
+						r.Post("/trainings", proxy.ForwardToInventory)
+						r.Put("/trainings/{trId}", proxy.ForwardToInventory)
+						r.Delete("/trainings/{trId}", proxy.ForwardToInventory)
+						r.Get("/incidents", proxy.ForwardToInventory)
+						r.Post("/incidents", proxy.ForwardToInventory)
+						r.Put("/incidents/{incId}", proxy.ForwardToInventory)
+						r.Delete("/incidents/{incId}", proxy.ForwardToInventory)
+					})
 				})
 
 				// Batch routes
@@ -285,7 +313,19 @@ func main() {
 					r.Put("/{id}", proxy.ForwardToInventory)
 					r.Delete("/{id}", proxy.ForwardToInventory)
 					r.Post("/{id}/adjust", proxy.ForwardToInventory)
+					r.Post("/{id}/open", proxy.ForwardToInventory)
 				})
+
+				// Document routes
+				r.Route("/documents", func(r chi.Router) {
+					r.Delete("/{id}", proxy.ForwardToInventory)
+					r.Get("/{id}/download", proxy.ForwardToInventory)
+				})
+
+				// PDF exports
+				r.Get("/export/inventory-register", proxy.ForwardToInventory)
+				r.Get("/export/gefahrstoffverzeichnis", proxy.ForwardToInventory)
+				r.Get("/export/bestandsverzeichnis", proxy.ForwardToInventory)
 
 				// Alerts
 				r.Get("/alerts", proxy.ForwardToInventory)

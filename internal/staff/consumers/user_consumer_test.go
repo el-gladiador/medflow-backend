@@ -18,7 +18,7 @@ var suite *testutil.IntegrationSuite
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 	var err error
-	suite, err = testutil.NewIntegrationSuite(ctx)
+	suite, err = testutil.NewIntegrationSuite(ctx, "staff, public")
 	if err != nil {
 		panic(err)
 	}

@@ -27,16 +27,19 @@ type StorageRoom struct {
 // StorageCabinet represents a storage cabinet
 // Actual DB schema: room_id, name, description, temperature_controlled, target_temperature_celsius, requires_key, is_active
 type StorageCabinet struct {
-	ID                      string   `db:"id" json:"id"`
-	RoomID                  string   `db:"room_id" json:"room_id"`
-	Name                    string   `db:"name" json:"name"`
-	Description             *string  `db:"description" json:"description,omitempty"`
-	TemperatureControlled   bool     `db:"temperature_controlled" json:"temperature_controlled"`
-	TargetTemperature       *float64 `db:"target_temperature_celsius" json:"target_temperature_celsius,omitempty"`
-	RequiresKey             bool     `db:"requires_key" json:"requires_key"`
-	IsActive                bool     `db:"is_active" json:"is_active"`
-	CreatedAt               time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt               time.Time `db:"updated_at" json:"updated_at"`
+	ID                           string    `db:"id" json:"id"`
+	RoomID                       string    `db:"room_id" json:"room_id"`
+	Name                         string    `db:"name" json:"name"`
+	Description                  *string   `db:"description" json:"description,omitempty"`
+	TemperatureControlled        bool      `db:"temperature_controlled" json:"temperature_controlled"`
+	TargetTemperature            *float64  `db:"target_temperature_celsius" json:"target_temperature_celsius,omitempty"`
+	RequiresKey                  bool      `db:"requires_key" json:"requires_key"`
+	IsActive                     bool      `db:"is_active" json:"is_active"`
+	MinTemperature               *float64  `db:"min_temperature_celsius" json:"min_temperature_celsius,omitempty"`
+	MaxTemperature               *float64  `db:"max_temperature_celsius" json:"max_temperature_celsius,omitempty"`
+	TemperatureMonitoringEnabled bool      `db:"temperature_monitoring_enabled" json:"temperature_monitoring_enabled"`
+	CreatedAt                    time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt                    time.Time `db:"updated_at" json:"updated_at"`
 }
 
 // StorageShelf represents a storage shelf
@@ -212,13 +215,15 @@ func (r *LocationRepository) CreateCabinet(ctx context.Context, cabinet *Storage
 	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			INSERT INTO storage_cabinets (id, tenant_id, room_id, name, description, temperature_controlled,
-			       target_temperature_celsius, requires_key, is_active)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			       target_temperature_celsius, requires_key, is_active,
+			       min_temperature_celsius, max_temperature_celsius, temperature_monitoring_enabled)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 			RETURNING created_at, updated_at
 		`
 		return r.db.QueryRowxContext(ctx, query,
 			cabinet.ID, tenantID, cabinet.RoomID, cabinet.Name, cabinet.Description,
 			cabinet.TemperatureControlled, cabinet.TargetTemperature, cabinet.RequiresKey, cabinet.IsActive,
+			cabinet.MinTemperature, cabinet.MaxTemperature, cabinet.TemperatureMonitoringEnabled,
 		).Scan(&cabinet.CreatedAt, &cabinet.UpdatedAt)
 	})
 }
@@ -234,7 +239,9 @@ func (r *LocationRepository) GetCabinet(ctx context.Context, id string) (*Storag
 	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, room_id, name, description, temperature_controlled,
-			       target_temperature_celsius, requires_key, is_active, created_at, updated_at
+			       target_temperature_celsius, requires_key, is_active,
+			       min_temperature_celsius, max_temperature_celsius, temperature_monitoring_enabled,
+			       created_at, updated_at
 			FROM storage_cabinets WHERE id = $1 AND deleted_at IS NULL
 		`
 		return r.db.GetContext(ctx, &cabinet, query, id)
@@ -260,7 +267,9 @@ func (r *LocationRepository) ListCabinets(ctx context.Context, roomID string) ([
 	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, room_id, name, description, temperature_controlled,
-			       target_temperature_celsius, requires_key, is_active, created_at, updated_at
+			       target_temperature_celsius, requires_key, is_active,
+			       min_temperature_celsius, max_temperature_celsius, temperature_monitoring_enabled,
+			       created_at, updated_at
 			FROM storage_cabinets WHERE room_id = $1 AND is_active = true AND deleted_at IS NULL ORDER BY name
 		`
 		return r.db.SelectContext(ctx, &cabinets, query, roomID)
@@ -283,7 +292,9 @@ func (r *LocationRepository) ListAllCabinets(ctx context.Context) ([]*StorageCab
 	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			SELECT id, room_id, name, description, temperature_controlled,
-			       target_temperature_celsius, requires_key, is_active, created_at, updated_at
+			       target_temperature_celsius, requires_key, is_active,
+			       min_temperature_celsius, max_temperature_celsius, temperature_monitoring_enabled,
+			       created_at, updated_at
 			FROM storage_cabinets WHERE is_active = true AND deleted_at IS NULL ORDER BY name
 		`
 		return r.db.SelectContext(ctx, &cabinets, query)
@@ -305,12 +316,15 @@ func (r *LocationRepository) UpdateCabinet(ctx context.Context, cabinet *Storage
 	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
 			UPDATE storage_cabinets SET room_id = $2, name = $3, description = $4, temperature_controlled = $5,
-			target_temperature_celsius = $6, requires_key = $7, is_active = $8, updated_at = NOW()
+			target_temperature_celsius = $6, requires_key = $7, is_active = $8,
+			min_temperature_celsius = $9, max_temperature_celsius = $10, temperature_monitoring_enabled = $11,
+			updated_at = NOW()
 			WHERE id = $1 AND deleted_at IS NULL
 		`
 		result, err := r.db.ExecContext(ctx, query,
 			cabinet.ID, cabinet.RoomID, cabinet.Name, cabinet.Description,
 			cabinet.TemperatureControlled, cabinet.TargetTemperature, cabinet.RequiresKey, cabinet.IsActive,
+			cabinet.MinTemperature, cabinet.MaxTemperature, cabinet.TemperatureMonitoringEnabled,
 		)
 		if err != nil {
 			return err

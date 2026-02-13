@@ -107,6 +107,20 @@ func (h *BatchHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	httputil.NoContent(w)
 }
 
+// OpenBatch marks a batch as opened (AMG medication tracking)
+func (h *BatchHandler) OpenBatch(w http.ResponseWriter, r *http.Request) {
+	batchID := chi.URLParam(r, "id")
+
+	batch, err := h.service.OpenBatch(r.Context(), batchID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("batch_id", batchID).Msg("failed to open batch")
+		httputil.Error(w, err)
+		return
+	}
+
+	httputil.JSON(w, http.StatusOK, batch)
+}
+
 // AdjustStock adjusts stock for a batch
 func (h *BatchHandler) AdjustStock(w http.ResponseWriter, r *http.Request) {
 	batchID := chi.URLParam(r, "id")

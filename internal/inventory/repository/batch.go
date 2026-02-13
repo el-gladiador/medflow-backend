@@ -12,8 +12,6 @@ import (
 )
 
 // InventoryBatch represents an inventory batch
-// Tenant schema: id, item_id, location_id, batch_number, lot_number, initial_quantity,
-// current_quantity, reserved_quantity, manufactured_date, expiry_date, received_date, status
 type InventoryBatch struct {
 	ID               string     `db:"id" json:"id"`
 	ItemID           string     `db:"item_id" json:"item_id"`
@@ -26,6 +24,7 @@ type InventoryBatch struct {
 	ManufacturedDate *time.Time `db:"manufactured_date" json:"manufactured_date,omitempty"`
 	ExpiryDate       *time.Time `db:"expiry_date" json:"expiry_date,omitempty"`
 	ReceivedDate     time.Time  `db:"received_date" json:"received_date"`
+	OpenedAt         *time.Time `db:"opened_at" json:"opened_at,omitempty"`
 	Status           string     `db:"status" json:"status"`
 	CreatedAt        time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt        time.Time  `db:"updated_at" json:"updated_at"`
@@ -83,15 +82,15 @@ func (r *BatchRepository) Create(ctx context.Context, batch *InventoryBatch) err
 			INSERT INTO inventory_batches (
 				id, tenant_id, item_id, location_id, batch_number, lot_number, initial_quantity,
 				current_quantity, reserved_quantity, manufactured_date, expiry_date,
-				received_date, status
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+				received_date, opened_at, status
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			RETURNING created_at, updated_at
 		`
 
 		return r.db.QueryRowxContext(ctx, query,
 			batch.ID, tenantID, batch.ItemID, batch.LocationID, batch.BatchNumber, batch.LotNumber,
 			batch.InitialQuantity, batch.CurrentQuantity, batch.ReservedQuantity,
-			batch.ManufacturedDate, batch.ExpiryDate, batch.ReceivedDate, batch.Status,
+			batch.ManufacturedDate, batch.ExpiryDate, batch.ReceivedDate, batch.OpenedAt, batch.Status,
 		).Scan(&batch.CreatedAt, &batch.UpdatedAt)
 	})
 }
@@ -112,7 +111,7 @@ func (r *BatchRepository) GetByID(ctx context.Context, id string) (*InventoryBat
 		query := `
 			SELECT id, item_id, location_id, batch_number, lot_number, initial_quantity,
 			       current_quantity, reserved_quantity, manufactured_date, expiry_date,
-			       received_date, status, created_at, updated_at
+			       received_date, opened_at, status, created_at, updated_at
 			FROM inventory_batches WHERE id = $1 AND deleted_at IS NULL
 		`
 		return r.db.GetContext(ctx, &batch, query, id)
@@ -147,7 +146,7 @@ func (r *BatchRepository) ListByItem(ctx context.Context, itemID string) ([]*Inv
 		query := `
 			SELECT id, item_id, location_id, batch_number, lot_number, initial_quantity,
 			       current_quantity, reserved_quantity, manufactured_date, expiry_date,
-			       received_date, status, created_at, updated_at
+			       received_date, opened_at, status, created_at, updated_at
 			FROM inventory_batches
 			WHERE item_id = $1 AND status = 'available' AND deleted_at IS NULL
 			ORDER BY expiry_date
@@ -185,14 +184,14 @@ func (r *BatchRepository) Update(ctx context.Context, batch *InventoryBatch) err
 			UPDATE inventory_batches SET
 				location_id = $2, batch_number = $3, lot_number = $4, initial_quantity = $5,
 				current_quantity = $6, reserved_quantity = $7, manufactured_date = $8,
-				expiry_date = $9, received_date = $10, status = $11, updated_at = NOW()
+				expiry_date = $9, received_date = $10, opened_at = $11, status = $12, updated_at = NOW()
 			WHERE id = $1 AND deleted_at IS NULL
 		`
 
 		result, err := r.db.ExecContext(ctx, query,
 			batch.ID, batch.LocationID, batch.BatchNumber, batch.LotNumber, batch.InitialQuantity,
 			batch.CurrentQuantity, batch.ReservedQuantity, batch.ManufacturedDate,
-			batch.ExpiryDate, batch.ReceivedDate, batch.Status,
+			batch.ExpiryDate, batch.ReceivedDate, batch.OpenedAt, batch.Status,
 		)
 		if err != nil {
 			return err
@@ -276,7 +275,7 @@ func (r *BatchRepository) GetExpiringBatches(ctx context.Context, withinDays int
 		query := `
 			SELECT id, item_id, location_id, batch_number, lot_number, initial_quantity,
 			       current_quantity, reserved_quantity, manufactured_date, expiry_date,
-			       received_date, status, created_at, updated_at
+			       received_date, opened_at, status, created_at, updated_at
 			FROM inventory_batches
 			WHERE status = 'available' AND deleted_at IS NULL AND current_quantity > 0
 			AND expiry_date <= NOW() + INTERVAL '1 day' * $1
@@ -316,7 +315,7 @@ func (r *BatchRepository) GetExpiredBatches(ctx context.Context) ([]*InventoryBa
 		query := `
 			SELECT id, item_id, location_id, batch_number, lot_number, initial_quantity,
 			       current_quantity, reserved_quantity, manufactured_date, expiry_date,
-			       received_date, status, created_at, updated_at
+			       received_date, opened_at, status, created_at, updated_at
 			FROM inventory_batches
 			WHERE status = 'available' AND deleted_at IS NULL AND current_quantity > 0 AND expiry_date < NOW()
 			ORDER BY expiry_date
@@ -406,7 +405,7 @@ func (r *BatchRepository) GetAllActiveBatches(ctx context.Context) ([]*Inventory
 		query := `
 			SELECT id, item_id, location_id, batch_number, lot_number, initial_quantity,
 			       current_quantity, reserved_quantity, manufactured_date, expiry_date,
-			       received_date, status, created_at, updated_at
+			       received_date, opened_at, status, created_at, updated_at
 			FROM inventory_batches WHERE status = 'available' AND deleted_at IS NULL ORDER BY expiry_date
 		`
 		if err := r.db.SelectContext(ctx, &batches, query); err != nil {

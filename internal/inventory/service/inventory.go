@@ -12,12 +12,18 @@ import (
 
 // InventoryService handles inventory business logic
 type InventoryService struct {
-	locationRepo *repository.LocationRepository
-	itemRepo     *repository.ItemRepository
-	batchRepo    *repository.BatchRepository
-	alertRepo    *repository.AlertRepository
-	publisher    *events.InventoryEventPublisher
-	logger       *logger.Logger
+	locationRepo    *repository.LocationRepository
+	itemRepo        *repository.ItemRepository
+	batchRepo       *repository.BatchRepository
+	alertRepo       *repository.AlertRepository
+	hazardousRepo   *repository.HazardousRepository
+	documentRepo    *repository.DocumentRepository
+	temperatureRepo *repository.TemperatureRepository
+	inspectionRepo  *repository.InspectionRepository
+	trainingRepo    *repository.TrainingRepository
+	incidentRepo    *repository.IncidentRepository
+	publisher       *events.InventoryEventPublisher
+	logger          *logger.Logger
 }
 
 // NewInventoryService creates a new inventory service
@@ -26,16 +32,28 @@ func NewInventoryService(
 	itemRepo *repository.ItemRepository,
 	batchRepo *repository.BatchRepository,
 	alertRepo *repository.AlertRepository,
+	hazardousRepo *repository.HazardousRepository,
+	documentRepo *repository.DocumentRepository,
+	temperatureRepo *repository.TemperatureRepository,
+	inspectionRepo *repository.InspectionRepository,
+	trainingRepo *repository.TrainingRepository,
+	incidentRepo *repository.IncidentRepository,
 	publisher *events.InventoryEventPublisher,
 	log *logger.Logger,
 ) *InventoryService {
 	return &InventoryService{
-		locationRepo: locationRepo,
-		itemRepo:     itemRepo,
-		batchRepo:    batchRepo,
-		alertRepo:    alertRepo,
-		publisher:    publisher,
-		logger:       log,
+		locationRepo:    locationRepo,
+		itemRepo:        itemRepo,
+		batchRepo:       batchRepo,
+		alertRepo:       alertRepo,
+		hazardousRepo:   hazardousRepo,
+		documentRepo:    documentRepo,
+		temperatureRepo: temperatureRepo,
+		inspectionRepo:  inspectionRepo,
+		trainingRepo:    trainingRepo,
+		incidentRepo:    incidentRepo,
+		publisher:       publisher,
+		logger:          log,
 	}
 }
 
@@ -316,7 +334,415 @@ func (s *InventoryService) GetDashboardStats(ctx context.Context) (*DashboardSta
 	return stats, nil
 }
 
+// Hazardous substance operations
+
+// GetHazardousDetails gets hazardous substance details for an item
+func (s *InventoryService) GetHazardousDetails(ctx context.Context, itemID string) (*repository.HazardousSubstanceDetail, error) {
+	return s.hazardousRepo.GetByItemID(ctx, itemID)
+}
+
+// UpsertHazardousDetails creates or updates hazardous substance details
+func (s *InventoryService) UpsertHazardousDetails(ctx context.Context, detail *repository.HazardousSubstanceDetail) error {
+	return s.hazardousRepo.Upsert(ctx, detail)
+}
+
+// DeleteHazardousDetails deletes hazardous substance details for an item
+func (s *InventoryService) DeleteHazardousDetails(ctx context.Context, itemID string) error {
+	return s.hazardousRepo.Delete(ctx, itemID)
+}
+
+// Document operations
+
+// ListItemDocuments lists documents for an item
+func (s *InventoryService) ListItemDocuments(ctx context.Context, itemID string) ([]*repository.ItemDocument, error) {
+	return s.documentRepo.ListByItem(ctx, itemID)
+}
+
+// GetItemDocument gets a document by ID
+func (s *InventoryService) GetItemDocument(ctx context.Context, id string) (*repository.ItemDocument, error) {
+	return s.documentRepo.GetByID(ctx, id)
+}
+
+// CreateItemDocument creates a new item document
+func (s *InventoryService) CreateItemDocument(ctx context.Context, doc *repository.ItemDocument) error {
+	return s.documentRepo.Create(ctx, doc)
+}
+
+// DeleteItemDocument deletes an item document
+func (s *InventoryService) DeleteItemDocument(ctx context.Context, id string) error {
+	return s.documentRepo.Delete(ctx, id)
+}
+
+// Export operations
+
+// HazardousItemWithDetails represents an item with its hazardous details for export
+type HazardousItemWithDetails struct {
+	Item    *repository.InventoryItem            `json:"item"`
+	Details *repository.HazardousSubstanceDetail `json:"details"`
+}
+
+// ListAllHazardousItems lists all hazardous items with their details
+func (s *InventoryService) ListAllHazardousItems(ctx context.Context) ([]*HazardousItemWithDetails, error) {
+	items, err := s.itemRepo.GetAllActive(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	details, err := s.hazardousRepo.ListAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build lookup map
+	detailMap := make(map[string]*repository.HazardousSubstanceDetail)
+	for _, d := range details {
+		detailMap[d.ItemID] = d
+	}
+
+	var result []*HazardousItemWithDetails
+	for _, item := range items {
+		if !item.IsHazardous {
+			continue
+		}
+		result = append(result, &HazardousItemWithDetails{
+			Item:    item,
+			Details: detailMap[item.ID],
+		})
+	}
+
+	return result, nil
+}
+
+// GetAllActiveItems returns all active items (for inventory register export)
+func (s *InventoryService) GetAllActiveItems(ctx context.Context) ([]*repository.InventoryItem, error) {
+	return s.itemRepo.GetAllActive(ctx)
+}
+
+// ListMedicalDevices returns all active medical devices (for Bestandsverzeichnis)
+func (s *InventoryService) ListMedicalDevices(ctx context.Context) ([]*repository.InventoryItem, error) {
+	return s.itemRepo.ListMedicalDevices(ctx)
+}
+
+// Batch opening operations (AMG)
+
+// OpenBatch marks a batch as opened and sets opened_at timestamp
+func (s *InventoryService) OpenBatch(ctx context.Context, batchID string) (*repository.InventoryBatch, error) {
+	batch, err := s.batchRepo.GetByID(ctx, batchID)
+	if err != nil {
+		return nil, err
+	}
+
+	if batch.OpenedAt != nil {
+		return nil, fmt.Errorf("batch already opened on %s", batch.OpenedAt.Format("2006-01-02"))
+	}
+
+	now := time.Now()
+	batch.OpenedAt = &now
+
+	if err := s.batchRepo.Update(ctx, batch); err != nil {
+		return nil, err
+	}
+
+	// Check if effective expiry triggers alerts
+	item, err := s.itemRepo.GetByID(ctx, batch.ItemID)
+	if err == nil && item.ShelfLifeAfterOpeningDays != nil {
+		effectiveExpiry := GetEffectiveExpiry(batch, item)
+		if effectiveExpiry != nil {
+			daysUntil := int(time.Until(*effectiveExpiry).Hours() / 24)
+			if daysUntil <= 7 {
+				alertType := "opening_expiry_soon"
+				severity := "warning"
+				if daysUntil <= 0 {
+					alertType = "opening_expired"
+					severity = "critical"
+				}
+				alert := &repository.InventoryAlert{
+					AlertType:   alertType,
+					ItemID:      item.ID,
+					ItemName:    item.Name,
+					BatchID:     &batch.ID,
+					BatchNumber: &batch.BatchNumber,
+					Severity:    severity,
+					Message:     fmt.Sprintf("%s batch %s: post-opening expiry in %d days", item.Name, batch.BatchNumber, daysUntil),
+				}
+				s.alertRepo.Create(ctx, alert)
+			}
+		}
+	}
+
+	return batch, nil
+}
+
+// GetEffectiveExpiry returns the earlier of batch expiry and post-opening expiry
+func GetEffectiveExpiry(batch *repository.InventoryBatch, item *repository.InventoryItem) *time.Time {
+	if batch.OpenedAt == nil || item.ShelfLifeAfterOpeningDays == nil {
+		return batch.ExpiryDate
+	}
+
+	openingExpiry := batch.OpenedAt.AddDate(0, 0, *item.ShelfLifeAfterOpeningDays)
+
+	if batch.ExpiryDate == nil {
+		return &openingExpiry
+	}
+
+	if openingExpiry.Before(*batch.ExpiryDate) {
+		return &openingExpiry
+	}
+	return batch.ExpiryDate
+}
+
+// Temperature operations
+
+// RecordTemperature records a temperature reading for a cabinet
+func (s *InventoryService) RecordTemperature(ctx context.Context, cabinetID string, tempCelsius float64, source string, recordedBy *string, notes *string) (*repository.TemperatureReading, error) {
+	// Look up cabinet to check thresholds
+	cabinet, err := s.locationRepo.GetCabinet(ctx, cabinetID)
+	if err != nil {
+		return nil, fmt.Errorf("cabinet not found: %w", err)
+	}
+
+	// Determine if this is an excursion
+	isExcursion := false
+	if cabinet.MinTemperature != nil && tempCelsius < *cabinet.MinTemperature {
+		isExcursion = true
+	}
+	if cabinet.MaxTemperature != nil && tempCelsius > *cabinet.MaxTemperature {
+		isExcursion = true
+	}
+
+	reading := &repository.TemperatureReading{
+		CabinetID:          cabinetID,
+		TemperatureCelsius: tempCelsius,
+		RecordedAt:         time.Now(),
+		RecordedBy:         recordedBy,
+		Source:             source,
+		IsExcursion:        isExcursion,
+		Notes:              notes,
+	}
+
+	if err := s.temperatureRepo.Create(ctx, reading); err != nil {
+		return nil, err
+	}
+
+	// Generate alert if excursion
+	if isExcursion {
+		alert := &repository.InventoryAlert{
+			AlertType: "temperature_excursion",
+			ItemID:    cabinetID, // Using cabinet ID as reference
+			ItemName:  cabinet.Name,
+			Severity:  "critical",
+			Message:   fmt.Sprintf("Temperature excursion in %s: %.1f°C (range: %.1f-%.1f°C)", cabinet.Name, tempCelsius, derefFloat(cabinet.MinTemperature), derefFloat(cabinet.MaxTemperature)),
+		}
+		s.alertRepo.Create(ctx, alert)
+	}
+
+	return reading, nil
+}
+
+// ListTemperatureReadings lists temperature readings for a cabinet
+func (s *InventoryService) ListTemperatureReadings(ctx context.Context, cabinetID string, from, to *time.Time, page, perPage int) ([]*repository.TemperatureReading, int64, error) {
+	return s.temperatureRepo.ListByCabinet(ctx, cabinetID, from, to, page, perPage)
+}
+
+// CheckDailyTemperatureCompliance checks for monitored cabinets without readings today
+func (s *InventoryService) CheckDailyTemperatureCompliance(ctx context.Context) error {
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	cabinetIDs, err := s.temperatureRepo.GetMonitoredCabinetsWithoutReading(ctx, startOfDay)
+	if err != nil {
+		return err
+	}
+
+	for _, cabID := range cabinetIDs {
+		cabinet, err := s.locationRepo.GetCabinet(ctx, cabID)
+		if err != nil {
+			continue
+		}
+
+		alert := &repository.InventoryAlert{
+			AlertType: "temperature_missing",
+			ItemID:    cabID,
+			ItemName:  cabinet.Name,
+			Severity:  "warning",
+			Message:   fmt.Sprintf("No temperature reading today for %s", cabinet.Name),
+		}
+		s.alertRepo.Create(ctx, alert)
+	}
+
+	return nil
+}
+
+// Device inspection operations (Medizinproduktebuch)
+
+// CreateInspection creates an inspection and updates the item's STK/MTK dates
+func (s *InventoryService) CreateInspection(ctx context.Context, insp *repository.DeviceInspection) error {
+	if err := s.inspectionRepo.Create(ctx, insp); err != nil {
+		return err
+	}
+
+	// Update item's last/next STK/MTK dates
+	item, err := s.itemRepo.GetByID(ctx, insp.ItemID)
+	if err != nil {
+		return nil // Inspection created, but item update failed - non-fatal
+	}
+
+	switch insp.InspectionType {
+	case "STK":
+		item.LastStkDate = &insp.InspectionDate
+		item.NextStkDue = insp.NextDueDate
+	case "MTK":
+		item.LastMtkDate = &insp.InspectionDate
+		item.NextMtkDue = insp.NextDueDate
+	}
+
+	s.itemRepo.Update(ctx, item)
+	return nil
+}
+
+// ListInspections lists inspections for a device
+func (s *InventoryService) ListInspections(ctx context.Context, itemID string) ([]*repository.DeviceInspection, error) {
+	return s.inspectionRepo.ListByItem(ctx, itemID)
+}
+
+// GetInspection gets an inspection by ID
+func (s *InventoryService) GetInspection(ctx context.Context, id string) (*repository.DeviceInspection, error) {
+	return s.inspectionRepo.GetByID(ctx, id)
+}
+
+// UpdateInspection updates an inspection
+func (s *InventoryService) UpdateInspection(ctx context.Context, insp *repository.DeviceInspection) error {
+	return s.inspectionRepo.Update(ctx, insp)
+}
+
+// DeleteInspection deletes an inspection
+func (s *InventoryService) DeleteInspection(ctx context.Context, id string) error {
+	return s.inspectionRepo.Delete(ctx, id)
+}
+
+// Device training operations
+
+// CreateTraining creates a device training record
+func (s *InventoryService) CreateTraining(ctx context.Context, tr *repository.DeviceTraining) error {
+	return s.trainingRepo.Create(ctx, tr)
+}
+
+// ListTrainings lists trainings for a device
+func (s *InventoryService) ListTrainings(ctx context.Context, itemID string) ([]*repository.DeviceTraining, error) {
+	return s.trainingRepo.ListByItem(ctx, itemID)
+}
+
+// GetTraining gets a training by ID
+func (s *InventoryService) GetTraining(ctx context.Context, id string) (*repository.DeviceTraining, error) {
+	return s.trainingRepo.GetByID(ctx, id)
+}
+
+// UpdateTraining updates a training
+func (s *InventoryService) UpdateTraining(ctx context.Context, tr *repository.DeviceTraining) error {
+	return s.trainingRepo.Update(ctx, tr)
+}
+
+// DeleteTraining deletes a training
+func (s *InventoryService) DeleteTraining(ctx context.Context, id string) error {
+	return s.trainingRepo.Delete(ctx, id)
+}
+
+// Device incident operations
+
+// CreateIncident creates a device incident record
+func (s *InventoryService) CreateIncident(ctx context.Context, inc *repository.DeviceIncident) error {
+	return s.incidentRepo.Create(ctx, inc)
+}
+
+// ListIncidents lists incidents for a device
+func (s *InventoryService) ListIncidents(ctx context.Context, itemID string) ([]*repository.DeviceIncident, error) {
+	return s.incidentRepo.ListByItem(ctx, itemID)
+}
+
+// GetIncident gets an incident by ID
+func (s *InventoryService) GetIncident(ctx context.Context, id string) (*repository.DeviceIncident, error) {
+	return s.incidentRepo.GetByID(ctx, id)
+}
+
+// UpdateIncident updates an incident
+func (s *InventoryService) UpdateIncident(ctx context.Context, inc *repository.DeviceIncident) error {
+	return s.incidentRepo.Update(ctx, inc)
+}
+
+// DeleteIncident deletes an incident
+func (s *InventoryService) DeleteIncident(ctx context.Context, id string) error {
+	return s.incidentRepo.Delete(ctx, id)
+}
+
+// GenerateMaintenanceAlerts generates alerts for overdue/upcoming STK/MTK inspections
+func (s *InventoryService) GenerateMaintenanceAlerts(ctx context.Context) error {
+	items, err := s.itemRepo.ListMedicalDevices(ctx)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	soonThreshold := now.AddDate(0, 0, 30)
+
+	for _, item := range items {
+		// STK checks
+		if item.NextStkDue != nil {
+			if item.NextStkDue.Before(now) {
+				alert := &repository.InventoryAlert{
+					AlertType: "stk_overdue",
+					ItemID:    item.ID,
+					ItemName:  item.Name,
+					Severity:  "critical",
+					Message:   fmt.Sprintf("STK overdue for %s (due: %s) - Betriebsverbot!", item.Name, item.NextStkDue.Format("2006-01-02")),
+				}
+				s.alertRepo.Create(ctx, alert)
+			} else if item.NextStkDue.Before(soonThreshold) {
+				alert := &repository.InventoryAlert{
+					AlertType: "stk_due_soon",
+					ItemID:    item.ID,
+					ItemName:  item.Name,
+					Severity:  "warning",
+					Message:   fmt.Sprintf("STK due soon for %s (due: %s)", item.Name, item.NextStkDue.Format("2006-01-02")),
+				}
+				s.alertRepo.Create(ctx, alert)
+			}
+		}
+
+		// MTK checks
+		if item.NextMtkDue != nil {
+			if item.NextMtkDue.Before(now) {
+				alert := &repository.InventoryAlert{
+					AlertType: "mtk_overdue",
+					ItemID:    item.ID,
+					ItemName:  item.Name,
+					Severity:  "critical",
+					Message:   fmt.Sprintf("MTK overdue for %s (due: %s)", item.Name, item.NextMtkDue.Format("2006-01-02")),
+				}
+				s.alertRepo.Create(ctx, alert)
+			} else if item.NextMtkDue.Before(soonThreshold) {
+				alert := &repository.InventoryAlert{
+					AlertType: "mtk_due_soon",
+					ItemID:    item.ID,
+					ItemName:  item.Name,
+					Severity:  "warning",
+					Message:   fmt.Sprintf("MTK due soon for %s (due: %s)", item.Name, item.NextMtkDue.Format("2006-01-02")),
+				}
+				s.alertRepo.Create(ctx, alert)
+			}
+		}
+	}
+
+	return nil
+}
+
 // Helper functions
+
+func derefFloat(f *float64) float64 {
+	if f == nil {
+		return 0
+	}
+	return *f
+}
 
 func (s *InventoryService) enrichItem(item *repository.InventoryItem, batches []*repository.InventoryBatch) *ItemWithBatches {
 	result := &ItemWithBatches{
@@ -329,12 +755,15 @@ func (s *InventoryService) enrichItem(item *repository.InventoryItem, batches []
 		result.TotalStock += b.Quantity
 	}
 
-	// Find nearest expiry
+	// Find nearest expiry (considering effective expiry for opened batches)
 	var nearestExpiry *time.Time
 	for _, b := range batches {
-		if b.Quantity > 0 && b.ExpiryDate != nil {
-			if nearestExpiry == nil || b.ExpiryDate.Before(*nearestExpiry) {
-				nearestExpiry = b.ExpiryDate
+		if b.Quantity > 0 {
+			effectiveExpiry := GetEffectiveExpiry(b, item)
+			if effectiveExpiry != nil {
+				if nearestExpiry == nil || effectiveExpiry.Before(*nearestExpiry) {
+					nearestExpiry = effectiveExpiry
+				}
 			}
 		}
 	}
