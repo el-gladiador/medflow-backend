@@ -351,25 +351,27 @@ cloud-urls: ## Print deployed Cloud Run service URLs
 		fi; \
 	done
 
+GIT_SHORT_SHA = $(shell git rev-parse --short HEAD)
+
 cloud-submit-%: ## Submit a Go service pipeline (e.g., make cloud-submit-staff-service)
 	@echo "Submitting Cloud Build for $*..."
 	@gcloud builds submit \
 		--config=cloudbuild.go-service.yaml \
-		--substitutions=_SERVICE=$*,_DOCKERFILE=$(call get_dockerfile,$*),_REGION=$(GCP_REGION),_REPOSITORY=$(GCP_REPOSITORY) \
+		--substitutions=SHORT_SHA=$(GIT_SHORT_SHA),_SERVICE=$*,_DOCKERFILE=$(call get_dockerfile,$*),_REGION=$(GCP_REGION),_REPOSITORY=$(GCP_REPOSITORY) \
 		.
 
 cloud-submit-vision-brain: ## Submit vision-brain pipeline
 	@echo "Submitting Cloud Build for vision-brain..."
 	@gcloud builds submit \
 		--config=cloudbuild.vision-brain.yaml \
-		--substitutions=_REGION=$(GCP_REGION),_REPOSITORY=$(GCP_REPOSITORY) \
+		--substitutions=SHORT_SHA=$(GIT_SHORT_SHA),_REGION=$(GCP_REGION),_REPOSITORY=$(GCP_REPOSITORY) \
 		.
 
 cloud-submit-vision-gpu: ## Submit vision-gpu pipeline
 	@echo "Submitting Cloud Build for vision-gpu..."
 	@gcloud builds submit \
 		--config=cloudbuild.vision-gpu.yaml \
-		--substitutions=_REGION=$(GCP_REGION),_REPOSITORY=$(GCP_REPOSITORY) \
+		--substitutions=SHORT_SHA=$(GIT_SHORT_SHA),_REGION=$(GCP_REGION),_REPOSITORY=$(GCP_REPOSITORY) \
 		.
 
 cloud-submit-go: ## Submit all 5 Go service pipelines
