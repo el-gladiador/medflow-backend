@@ -356,6 +356,7 @@ GIT_SHORT_SHA = $(shell git rev-parse --short HEAD)
 cloud-submit-%: ## Submit a Go service pipeline (e.g., make cloud-submit-staff-service)
 	@echo "Submitting Cloud Build for $*..."
 	@gcloud builds submit \
+		--region=$(GCP_REGION) \
 		--config=cloudbuild.go-service.yaml \
 		--substitutions=SHORT_SHA=$(GIT_SHORT_SHA),_SERVICE=$*,_DOCKERFILE=$(call get_dockerfile,$*),_REGION=$(GCP_REGION),_REPOSITORY=$(GCP_REPOSITORY) \
 		.
@@ -363,6 +364,7 @@ cloud-submit-%: ## Submit a Go service pipeline (e.g., make cloud-submit-staff-s
 cloud-submit-vision-brain: ## Submit vision-brain pipeline
 	@echo "Submitting Cloud Build for vision-brain..."
 	@gcloud builds submit \
+		--region=$(GCP_REGION) \
 		--config=cloudbuild.vision-brain.yaml \
 		--substitutions=SHORT_SHA=$(GIT_SHORT_SHA),_REGION=$(GCP_REGION),_REPOSITORY=$(GCP_REPOSITORY) \
 		.
@@ -370,6 +372,7 @@ cloud-submit-vision-brain: ## Submit vision-brain pipeline
 cloud-submit-vision-gpu: ## Submit vision-gpu pipeline
 	@echo "Submitting Cloud Build for vision-gpu..."
 	@gcloud builds submit \
+		--region=$(GCP_REGION) \
 		--config=cloudbuild.vision-gpu.yaml \
 		--substitutions=SHORT_SHA=$(GIT_SHORT_SHA),_REGION=$(GCP_REGION),_REPOSITORY=$(GCP_REPOSITORY) \
 		.
