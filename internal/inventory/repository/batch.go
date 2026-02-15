@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -130,6 +131,41 @@ func (r *BatchRepository) GetByID(ctx context.Context, id string) (*InventoryBat
 	return &batch, nil
 }
 
+// GetByBatchNumber gets a batch by batch number
+// TENANT-ISOLATED: Queries via RLS
+func (r *BatchRepository) GetByBatchNumber(ctx context.Context, batchNumber string) (*InventoryBatch, error) {
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
+	if err != nil {
+		return nil, err // Fail-fast if tenant context missing
+	}
+
+	var batch InventoryBatch
+
+	// Execute query with tenant RLS
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
+		query := `
+			SELECT id, item_id, location_id, batch_number, lot_number, initial_quantity,
+			       current_quantity, reserved_quantity, manufactured_date, expiry_date,
+			       received_date, opened_at, status, created_at, updated_at
+			FROM inventory_batches WHERE batch_number = $1 AND deleted_at IS NULL
+		`
+		return r.db.GetContext(ctx, &batch, query, batchNumber)
+	})
+
+	if err == sql.ErrNoRows {
+		return nil, errors.NotFound("batch")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Set computed quantity field
+	batch.Quantity = batch.CurrentQuantity
+
+	return &batch, nil
+}
+
 // ListByItem lists batches for an item
 // TENANT-ISOLATED: Returns only batches via RLS
 func (r *BatchRepository) ListByItem(ctx context.Context, itemID string) ([]*InventoryBatch, error) {
@@ -207,7 +243,7 @@ func (r *BatchRepository) Update(ctx context.Context, batch *InventoryBatch) err
 }
 
 // Delete deletes a batch
-// TENANT-ISOLATED: Deletes via RLS
+// TENANT-ISOLATED: Soft-deletes via RLS (sets deleted_at instead of removing row)
 func (r *BatchRepository) Delete(ctx context.Context, id string) error {
 	// Extract tenant ID from context
 	tenantID, err := tenant.TenantID(ctx)
@@ -215,9 +251,9 @@ func (r *BatchRepository) Delete(ctx context.Context, id string) error {
 		return err // Fail-fast if tenant context missing
 	}
 
-	// Execute query with tenant RLS
+	// Execute query with tenant RLS — soft delete for GDPR compliance
 	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
-		query := `DELETE FROM inventory_batches WHERE id = $1`
+		query := `UPDATE inventory_batches SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
 		result, err := r.db.ExecContext(ctx, query, id)
 		if err != nil {
 			return err
@@ -338,7 +374,9 @@ func (r *BatchRepository) GetExpiredBatches(ctx context.Context) ([]*InventoryBa
 	return batches, nil
 }
 
-// AdjustStock adjusts the stock for a batch
+// AdjustStock adjusts the stock for a batch using atomic SQL operations.
+// Uses SELECT ... FOR UPDATE to prevent race conditions on concurrent adjustments.
+// Rejects deductions that would result in negative stock.
 // TENANT-ISOLATED: Updates and inserts via RLS
 func (r *BatchRepository) AdjustStock(ctx context.Context, adj *StockAdjustment) error {
 	// Extract tenant ID from context
@@ -351,25 +389,60 @@ func (r *BatchRepository) AdjustStock(ctx context.Context, adj *StockAdjustment)
 		adj.ID = uuid.New().String()
 	}
 
-	// Calculate new quantity
-	var newQty int
-	switch adj.AdjustmentType {
-	case "add":
-		newQty = adj.PreviousQuantity + adj.Quantity
-	case "deduct":
-		newQty = adj.PreviousQuantity - adj.Quantity
-	case "adjust":
-		newQty = adj.Quantity
-	}
-	adj.NewQuantity = newQty
-
-	// Execute queries with tenant RLS
+	// Execute queries with tenant RLS (already inside a transaction via WithTenantRLS)
 	return r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
-		// Update batch current_quantity if batch ID provided
+		// If adjusting a specific batch, atomically lock + read + validate + update
 		if adj.BatchID != nil {
-			query := `UPDATE inventory_batches SET current_quantity = $2, updated_at = NOW() WHERE id = $1`
-			if _, err := r.db.ExecContext(ctx, query, *adj.BatchID, newQty); err != nil {
+			// Lock the row to prevent concurrent modifications (SELECT FOR UPDATE)
+			var currentQty int
+			lockQuery := `SELECT current_quantity FROM inventory_batches WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`
+			if err := r.db.QueryRowxContext(ctx, lockQuery, *adj.BatchID).Scan(&currentQty); err != nil {
+				if err == sql.ErrNoRows {
+					return errors.NotFound("batch")
+				}
 				return err
+			}
+
+			// Use the actual current quantity from DB, not the stale value from earlier read
+			adj.PreviousQuantity = currentQty
+
+			// Calculate new quantity
+			var newQty int
+			switch adj.AdjustmentType {
+			case "add":
+				newQty = currentQty + adj.Quantity
+			case "deduct":
+				newQty = currentQty - adj.Quantity
+			case "adjust":
+				newQty = adj.Quantity
+			default:
+				return errors.BadRequest("invalid adjustment type: " + adj.AdjustmentType)
+			}
+
+			// Prevent negative stock
+			if newQty < 0 {
+				return errors.BadRequest("insufficient stock: cannot deduct " +
+					fmt.Sprintf("%d", adj.Quantity) + " from current stock of " +
+					fmt.Sprintf("%d", currentQty))
+			}
+
+			adj.NewQuantity = newQty
+
+			updateQuery := `UPDATE inventory_batches SET current_quantity = $2, updated_at = NOW() WHERE id = $1`
+			if _, err := r.db.ExecContext(ctx, updateQuery, *adj.BatchID, newQty); err != nil {
+				return err
+			}
+		} else {
+			// No batch ID — just calculate quantities for the adjustment record
+			switch adj.AdjustmentType {
+			case "add":
+				adj.NewQuantity = adj.PreviousQuantity + adj.Quantity
+			case "deduct":
+				adj.NewQuantity = adj.PreviousQuantity - adj.Quantity
+			case "adjust":
+				adj.NewQuantity = adj.Quantity
+			default:
+				return errors.BadRequest("invalid adjustment type: " + adj.AdjustmentType)
 			}
 		}
 

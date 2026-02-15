@@ -26,6 +26,7 @@ type InventoryItem struct {
 	ReorderQuantity   *int       `db:"reorder_quantity" json:"reorder_quantity,omitempty"`
 	Barcode           *string    `db:"barcode" json:"barcode,omitempty"`
 	ArticleNumber     *string    `db:"article_number" json:"article_number,omitempty"`
+	PZN               *string    `db:"pzn" json:"pzn,omitempty"`
 	Manufacturer      *string    `db:"manufacturer" json:"manufacturer,omitempty"`
 	Supplier          *string    `db:"supplier" json:"supplier,omitempty"`
 	UseBatchTracking  bool       `db:"use_batch_tracking" json:"use_batch_tracking"`
@@ -99,7 +100,7 @@ func (r *ItemRepository) Create(ctx context.Context, item *InventoryItem) error 
 		query := `
 			INSERT INTO inventory_items (
 				id, tenant_id, name, description, category, unit, unit_price_cents, currency, min_stock,
-				max_stock, reorder_point, reorder_quantity, barcode, article_number, manufacturer,
+				max_stock, reorder_point, reorder_quantity, barcode, article_number, pzn, manufacturer,
 				supplier, use_batch_tracking, requires_cooling, is_hazardous, shelf_life_days,
 				default_location_id, is_active,
 				manufacturer_address, ce_marking_number, notified_body_id, acquisition_date,
@@ -108,16 +109,17 @@ func (r *ItemRepository) Create(ctx context.Context, item *InventoryItem) error 
 				operational_id_number, location_assignment, risk_class,
 				stk_interval_months, mtk_interval_months, last_stk_date, next_stk_due,
 				last_mtk_date, next_mtk_due, shelf_life_after_opening_days
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
-				$23, $24, $25, $26, $27, $28, $29,
-				$30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+				$22, $23,
+				$24, $25, $26, $27, $28, $29, $30,
+				$31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)
 			RETURNING created_at, updated_at
 		`
 
 		return r.db.QueryRowxContext(ctx, query,
 			item.ID, tenantID, item.Name, item.Description, item.Category, item.Unit, item.UnitPriceCents,
 			item.Currency, item.MinStock, item.MaxStock, item.ReorderPoint, item.ReorderQuantity,
-			item.Barcode, item.ArticleNumber, item.Manufacturer, item.Supplier, item.UseBatchTracking,
+			item.Barcode, item.ArticleNumber, item.PZN, item.Manufacturer, item.Supplier, item.UseBatchTracking,
 			item.RequiresCooling, item.IsHazardous, item.ShelfLifeDays, item.DefaultLocationID,
 			item.IsActive,
 			item.ManufacturerAddress, item.CEMarkingNumber, item.NotifiedBodyID, item.AcquisitionDate,
@@ -144,7 +146,7 @@ func (r *ItemRepository) GetByID(ctx context.Context, id string) (*InventoryItem
 	// Execute query with tenant RLS
 	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-			SELECT id, name, description, category, barcode, article_number, manufacturer, supplier,
+			SELECT id, name, description, category, barcode, article_number, pzn, manufacturer, supplier,
 			       unit, min_stock, max_stock, reorder_point, reorder_quantity, use_batch_tracking,
 			       requires_cooling, is_hazardous, shelf_life_days, default_location_id,
 			       unit_price_cents, currency, is_active,
@@ -187,7 +189,7 @@ func (r *ItemRepository) GetByBarcode(ctx context.Context, barcode string) (*Inv
 	// Execute query with tenant RLS
 	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-			SELECT id, name, description, category, barcode, article_number, manufacturer, supplier,
+			SELECT id, name, description, category, barcode, article_number, pzn, manufacturer, supplier,
 			       unit, min_stock, max_stock, reorder_point, reorder_quantity, use_batch_tracking,
 			       requires_cooling, is_hazardous, shelf_life_days, default_location_id,
 			       unit_price_cents, currency, is_active,
@@ -201,6 +203,49 @@ func (r *ItemRepository) GetByBarcode(ctx context.Context, barcode string) (*Inv
 			FROM inventory_items WHERE barcode = $1 AND deleted_at IS NULL
 		`
 		return r.db.GetContext(ctx, &item, query, barcode)
+	})
+
+	if err == sql.ErrNoRows {
+		return nil, errors.NotFound("item")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Compute price_per_unit from cents
+	item.PricePerUnit = float64(item.UnitPriceCents) / 100.0
+
+	return &item, nil
+}
+
+// GetByArticleNumber gets an item by article number
+// TENANT-ISOLATED: Queries only the tenant's schema via RLS
+func (r *ItemRepository) GetByArticleNumber(ctx context.Context, articleNumber string) (*InventoryItem, error) {
+	// Extract tenant ID from context
+	tenantID, err := tenant.TenantID(ctx)
+	if err != nil {
+		return nil, err // Fail-fast if tenant context missing
+	}
+
+	var item InventoryItem
+
+	// Execute query with tenant RLS
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
+		query := `
+			SELECT id, name, description, category, barcode, article_number, pzn, manufacturer, supplier,
+			       unit, min_stock, max_stock, reorder_point, reorder_quantity, use_batch_tracking,
+			       requires_cooling, is_hazardous, shelf_life_days, default_location_id,
+			       unit_price_cents, currency, is_active,
+			       manufacturer_address, ce_marking_number, notified_body_id, acquisition_date,
+			       serial_number, udi_di, udi_pi,
+			       is_medical_device, device_type, device_model, authorized_representative, importer,
+			       operational_id_number, location_assignment, risk_class,
+			       stk_interval_months, mtk_interval_months, last_stk_date, next_stk_due,
+			       last_mtk_date, next_mtk_due, shelf_life_after_opening_days,
+			       created_at, updated_at
+			FROM inventory_items WHERE article_number = $1 AND deleted_at IS NULL
+		`
+		return r.db.GetContext(ctx, &item, query, articleNumber)
 	})
 
 	if err == sql.ErrNoRows {
@@ -246,7 +291,7 @@ func (r *ItemRepository) List(ctx context.Context, page, perPage int, category s
 		// Get paginated items
 		offset := (page - 1) * perPage
 		query := `
-			SELECT id, name, description, category, barcode, article_number, manufacturer, supplier,
+			SELECT id, name, description, category, barcode, article_number, pzn, manufacturer, supplier,
 			       unit, min_stock, max_stock, reorder_point, reorder_quantity, use_batch_tracking,
 			       requires_cooling, is_hazardous, shelf_life_days, default_location_id,
 			       unit_price_cents, currency, is_active,
@@ -308,17 +353,17 @@ func (r *ItemRepository) Update(ctx context.Context, item *InventoryItem) error 
 			UPDATE inventory_items SET
 				name = $2, description = $3, category = $4, unit = $5, unit_price_cents = $6,
 				currency = $7, min_stock = $8, max_stock = $9, reorder_point = $10,
-				reorder_quantity = $11, barcode = $12, article_number = $13, manufacturer = $14,
-				supplier = $15, use_batch_tracking = $16, requires_cooling = $17, is_hazardous = $18,
-				shelf_life_days = $19, default_location_id = $20, is_active = $21,
-				manufacturer_address = $22, ce_marking_number = $23, notified_body_id = $24,
-				acquisition_date = $25, serial_number = $26, udi_di = $27, udi_pi = $28,
-				is_medical_device = $29, device_type = $30, device_model = $31,
-				authorized_representative = $32, importer = $33, operational_id_number = $34,
-				location_assignment = $35, risk_class = $36,
-				stk_interval_months = $37, mtk_interval_months = $38,
-				last_stk_date = $39, next_stk_due = $40, last_mtk_date = $41, next_mtk_due = $42,
-				shelf_life_after_opening_days = $43,
+				reorder_quantity = $11, barcode = $12, article_number = $13, pzn = $14, manufacturer = $15,
+				supplier = $16, use_batch_tracking = $17, requires_cooling = $18, is_hazardous = $19,
+				shelf_life_days = $20, default_location_id = $21, is_active = $22,
+				manufacturer_address = $23, ce_marking_number = $24, notified_body_id = $25,
+				acquisition_date = $26, serial_number = $27, udi_di = $28, udi_pi = $29,
+				is_medical_device = $30, device_type = $31, device_model = $32,
+				authorized_representative = $33, importer = $34, operational_id_number = $35,
+				location_assignment = $36, risk_class = $37,
+				stk_interval_months = $38, mtk_interval_months = $39,
+				last_stk_date = $40, next_stk_due = $41, last_mtk_date = $42, next_mtk_due = $43,
+				shelf_life_after_opening_days = $44,
 				updated_at = NOW()
 			WHERE id = $1 AND deleted_at IS NULL
 		`
@@ -326,7 +371,7 @@ func (r *ItemRepository) Update(ctx context.Context, item *InventoryItem) error 
 		result, err := r.db.ExecContext(ctx, query,
 			item.ID, item.Name, item.Description, item.Category, item.Unit, item.UnitPriceCents,
 			item.Currency, item.MinStock, item.MaxStock, item.ReorderPoint, item.ReorderQuantity,
-			item.Barcode, item.ArticleNumber, item.Manufacturer, item.Supplier, item.UseBatchTracking,
+			item.Barcode, item.ArticleNumber, item.PZN, item.Manufacturer, item.Supplier, item.UseBatchTracking,
 			item.RequiresCooling, item.IsHazardous, item.ShelfLifeDays, item.DefaultLocationID,
 			item.IsActive,
 			item.ManufacturerAddress, item.CEMarkingNumber, item.NotifiedBodyID, item.AcquisitionDate,
@@ -391,7 +436,7 @@ func (r *ItemRepository) GetAllActive(ctx context.Context) ([]*InventoryItem, er
 	// Execute query with tenant RLS
 	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-			SELECT id, name, description, category, barcode, article_number, manufacturer, supplier,
+			SELECT id, name, description, category, barcode, article_number, pzn, manufacturer, supplier,
 			       unit, min_stock, max_stock, reorder_point, reorder_quantity, use_batch_tracking,
 			       requires_cooling, is_hazardous, shelf_life_days, default_location_id,
 			       unit_price_cents, currency, is_active,
@@ -423,6 +468,46 @@ func (r *ItemRepository) GetAllActive(ctx context.Context) ([]*InventoryItem, er
 	return items, nil
 }
 
+// GetByPZN gets an item by PZN (Pharmazentralnummer)
+// TENANT-ISOLATED: Queries only the tenant's schema via RLS
+func (r *ItemRepository) GetByPZN(ctx context.Context, pzn string) (*InventoryItem, error) {
+	tenantID, err := tenant.TenantID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var item InventoryItem
+
+	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
+		query := `
+			SELECT id, name, description, category, barcode, article_number, pzn, manufacturer, supplier,
+			       unit, min_stock, max_stock, reorder_point, reorder_quantity, use_batch_tracking,
+			       requires_cooling, is_hazardous, shelf_life_days, default_location_id,
+			       unit_price_cents, currency, is_active,
+			       manufacturer_address, ce_marking_number, notified_body_id, acquisition_date,
+			       serial_number, udi_di, udi_pi,
+			       is_medical_device, device_type, device_model, authorized_representative, importer,
+			       operational_id_number, location_assignment, risk_class,
+			       stk_interval_months, mtk_interval_months, last_stk_date, next_stk_due,
+			       last_mtk_date, next_mtk_due, shelf_life_after_opening_days,
+			       created_at, updated_at
+			FROM inventory_items WHERE pzn = $1 AND deleted_at IS NULL
+		`
+		return r.db.GetContext(ctx, &item, query, pzn)
+	})
+
+	if err == sql.ErrNoRows {
+		return nil, errors.NotFound("item")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	item.PricePerUnit = float64(item.UnitPriceCents) / 100.0
+
+	return &item, nil
+}
+
 // ListMedicalDevices gets all active medical devices (for Bestandsverzeichnis MPBetreibV §14)
 // TENANT-ISOLATED: Returns only medical devices from the tenant's schema
 func (r *ItemRepository) ListMedicalDevices(ctx context.Context) ([]*InventoryItem, error) {
@@ -434,7 +519,7 @@ func (r *ItemRepository) ListMedicalDevices(ctx context.Context) ([]*InventoryIt
 	var items []*InventoryItem
 	err = r.db.WithTenantRLS(ctx, tenantID, func(ctx context.Context) error {
 		query := `
-		SELECT id, name, description, category, barcode, article_number, manufacturer, supplier,
+		SELECT id, name, description, category, barcode, article_number, pzn, manufacturer, supplier,
 			       unit, min_stock, max_stock, reorder_point, reorder_quantity, use_batch_tracking,
 			       requires_cooling, is_hazardous, shelf_life_days, default_location_id,
 			       unit_price_cents, currency, is_active,

@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/medflow/medflow-backend/internal/inventory/events"
 	"github.com/medflow/medflow-backend/internal/inventory/repository"
+	apperrors "github.com/medflow/medflow-backend/pkg/errors"
 	"github.com/medflow/medflow-backend/pkg/logger"
 )
 
@@ -153,22 +155,28 @@ func (s *InventoryService) DeleteBatch(ctx context.Context, id string) error {
 	return s.batchRepo.Delete(ctx, id)
 }
 
-// AdjustStock adjusts stock for a batch
+// AdjustStock adjusts stock for a batch.
+// The repository layer uses SELECT FOR UPDATE to prevent race conditions
+// and rejects deductions that would result in negative stock.
 func (s *InventoryService) AdjustStock(ctx context.Context, batchID string, adjustment int, adjustmentType, reason, userID, userName string) (*repository.StockAdjustment, error) {
+	if adjustment <= 0 {
+		return nil, fmt.Errorf("adjustment quantity must be positive, got %d", adjustment)
+	}
+
 	batch, err := s.batchRepo.GetByID(ctx, batchID)
 	if err != nil {
 		return nil, err
 	}
 
 	adj := &repository.StockAdjustment{
-		ItemID:           batch.ItemID,
-		BatchID:          &batchID,
-		AdjustmentType:   adjustmentType,
-		Quantity:         adjustment,
-		PreviousQuantity: batch.Quantity,
-		Reason:           &reason,
-		PerformedBy:      userID,
-		PerformedByName:  &userName,
+		ItemID:         batch.ItemID,
+		BatchID:        &batchID,
+		AdjustmentType: adjustmentType,
+		Quantity:       adjustment,
+		// PreviousQuantity is set atomically inside AdjustStock via SELECT FOR UPDATE
+		Reason:          &reason,
+		PerformedBy:     userID,
+		PerformedByName: &userName,
 	}
 
 	if err := s.batchRepo.AdjustStock(ctx, adj); err != nil {
@@ -733,6 +741,83 @@ func (s *InventoryService) GenerateMaintenanceAlerts(ctx context.Context) error 
 	}
 
 	return nil
+}
+
+// Scan operations
+
+// GetItemByBarcode looks up an item by barcode, falling back to article number, then PZN.
+// Only falls back on NotFound errors; real errors (DB connection, timeout) fail fast.
+func (s *InventoryService) GetItemByBarcode(ctx context.Context, barcode string) (*ItemWithBatches, error) {
+	if barcode == "" {
+		return nil, apperrors.BadRequest("barcode is required")
+	}
+
+	// 1. Try barcode column
+	item, err := s.itemRepo.GetByBarcode(ctx, barcode)
+	if err == nil {
+		return s.enrichItemWithBatches(ctx, item)
+	}
+	if !apperrors.Is(err, apperrors.ErrNotFound) {
+		return nil, err // Real error — fail fast, don't fallback
+	}
+
+	// 2. Fallback: try article_number
+	item, err = s.itemRepo.GetByArticleNumber(ctx, barcode)
+	if err == nil {
+		return s.enrichItemWithBatches(ctx, item)
+	}
+	if !apperrors.Is(err, apperrors.ErrNotFound) {
+		return nil, err
+	}
+
+	// 3. Fallback: try PZN (strip optional "PZN-" or "PZN" prefix)
+	pzn := barcode
+	pzn = strings.TrimPrefix(pzn, "PZN-")
+	pzn = strings.TrimPrefix(pzn, "PZN")
+	if pzn != "" {
+		item, err = s.itemRepo.GetByPZN(ctx, pzn)
+		if err == nil {
+			return s.enrichItemWithBatches(ctx, item)
+		}
+		if !apperrors.Is(err, apperrors.ErrNotFound) {
+			return nil, err
+		}
+	}
+
+	return nil, apperrors.NotFound("item")
+}
+
+// enrichItemWithBatches loads batches for an item and returns the enriched result.
+func (s *InventoryService) enrichItemWithBatches(ctx context.Context, item *repository.InventoryItem) (*ItemWithBatches, error) {
+	batches, err := s.batchRepo.ListByItem(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+	return s.enrichItem(item, batches), nil
+}
+
+// BatchWithItem represents a batch with its parent item
+type BatchWithItem struct {
+	*repository.InventoryBatch
+	Item *repository.InventoryItem `json:"item"`
+}
+
+// GetBatchByBatchNumber looks up a batch by batch number and includes parent item
+func (s *InventoryService) GetBatchByBatchNumber(ctx context.Context, batchNumber string) (*BatchWithItem, error) {
+	batch, err := s.batchRepo.GetByBatchNumber(ctx, batchNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	item, err := s.itemRepo.GetByID(ctx, batch.ItemID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &BatchWithItem{
+		InventoryBatch: batch,
+		Item:           item,
+	}, nil
 }
 
 // Helper functions

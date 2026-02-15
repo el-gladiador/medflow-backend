@@ -316,6 +316,12 @@ func main() {
 					r.Post("/{id}/open", proxy.ForwardToInventory)
 				})
 
+				// Scan/lookup routes
+				r.Route("/scan", func(r chi.Router) {
+					r.Get("/barcode/{barcode}", proxy.ForwardToInventory)
+					r.Get("/batch", proxy.ForwardToInventory)
+				})
+
 				// Document routes
 				r.Route("/documents", func(r chi.Router) {
 					r.Delete("/{id}", proxy.ForwardToInventory)

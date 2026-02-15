@@ -108,6 +108,7 @@ func main() {
 	exportHandler := handler.NewExportHandler(inventoryService, log)
 	temperatureHandler := handler.NewTemperatureHandler(inventoryService, log)
 	deviceBookHandler := handler.NewDeviceBookHandler(inventoryService, log)
+	scanHandler := handler.NewScanHandler(inventoryService, log)
 
 	// Regulatory compliance handlers
 	auditHandler := handler.NewAuditHandler(auditService, log)
@@ -242,6 +243,12 @@ func main() {
 			r.Delete("/{id}", batchHandler.Delete)
 			r.Post("/{id}/adjust", batchHandler.AdjustStock)
 			r.Post("/{id}/open", batchHandler.OpenBatch)
+		})
+
+		// Scan/lookup routes
+		r.Route("/scan", func(r chi.Router) {
+			r.Get("/barcode/{barcode}", scanHandler.LookupByBarcode)
+			r.Get("/batch", scanHandler.LookupByBatchNumber)
 		})
 
 		// Document routes (outside items for direct access by doc ID)
